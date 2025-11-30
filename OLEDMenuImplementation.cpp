@@ -1,6 +1,7 @@
 #define OSD_TIMEOUT 8000
 
 #include <ESP8266WiFi.h>
+#include <LittleFS.h>
 #include "OLEDMenuImplementation.h"
 #include "options.h"
 #include "tv5725.h"
@@ -138,7 +139,7 @@ bool presetSelectionMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OL
 bool presetsCreationMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav, bool)
 {
     SlotMetaArray slotsObject;
-    File slotsBinaryFileRead = SPIFFS.open(SLOTS_FILE, "r");
+    File slotsBinaryFileRead = LittleFS.open(SLOTS_FILE, "r");
     manager->clearSubItems(item);
     int curNumSlot = 0;
     if (slotsBinaryFileRead) {
