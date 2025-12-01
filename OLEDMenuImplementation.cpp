@@ -198,7 +198,9 @@ bool resetMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav,
     delay(50);
     switch (item->tag) {
         case MT_RESET_WIFI:
+            WiFi.persistent(true);
             WiFi.disconnect();
+            WiFi.persistent(false);
             break;
         case MT_RESTORE_FACTORY:
             loadDefaultUserOptions();
