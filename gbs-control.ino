@@ -9812,7 +9812,11 @@ void startWebserver()
         [](AsyncWebServerRequest *request) { request->send(200, "application/json", "true"); },
         [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
             if (!index) {
-                request->_tempFile = LittleFS.open("/" + filename, "w");
+                if (filename.startsWith("/")) {
+                    request->_tempFile = LittleFS.open(filename, "w");
+                } else {
+                    request->_tempFile = LittleFS.open("/" + filename, "w");
+                }
             }
             if (len) {
                 request->_tempFile.write(data, len);
