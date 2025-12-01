@@ -7215,8 +7215,8 @@ void setup()
     Serial.setTimeout(10);
 
     // millis() at this point: typically 65ms
-    // start web services as early in boot as possible
-    WiFi.hostname(device_hostname_partial); // was _full
+    // WiFi hostname will be set in PersWiFiManager::attemptConnection()
+    // Don't call WiFi.hostname() here - it can interfere with WiFi init
 
     startWire();
     // run some dummy commands to init I2C to GBS and cached segments
@@ -7226,9 +7226,23 @@ void setup()
     GBS::STATUS_00::read();
 
     if (rto->webServerEnabled) {
+        // Initialize WiFi settings before starting
+        // Force WiFi to sleep first to ensure clean state
+        WiFi.forceSleepBegin();
+        delay(100);
+        WiFi.forceSleepWake();
+        delay(100);
+        
+        WiFi.persistent(false);      // Avoid ESP8266 Core 3.1.x bug and flash wear
+        WiFi.setAutoConnect(false);  // Let PersWiFiManager handle connections
+        WiFi.setAutoReconnect(true); // Enable auto-reconnect on disconnect
+        WiFi.mode(WIFI_OFF);         // Start with WiFi off
+        delay(100);
+        
         rto->allowUpdatesOTA = false;       // need to initialize for handleWiFi()
         WiFi.setSleepMode(WIFI_NONE_SLEEP); // low latency responses, less chance for missing packets
-        WiFi.setOutputPower(16.0f);         // float: min 0.0f, max 20.5f
+        WiFi.setPhyMode(WIFI_PHY_MODE_11G); // Force 11g mode for better stability
+        WiFi.setOutputPower(18.0f);         // float: min 0.0f, max 20.5f
         startWebserver();
         rto->webServerStarted = true;
     } else {
@@ -7426,12 +7440,15 @@ void setup()
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-        // nothing
+        SerialM.print(F("(WiFi): Connected to "));
+        SerialM.println(WiFi.SSID());
     } else if (WiFi.SSID().length() == 0) {
         SerialM.println(FPSTR(ap_info_string));
     } else {
-        SerialM.println(F("(WiFi): still connecting.."));
-        WiFi.reconnect(); // only valid for station class (ok here)
+        SerialM.print(F("(WiFi): Connecting to "));
+        SerialM.print(WiFi.SSID());
+        SerialM.println(F("..."));
+        // Don't call reconnect here, let PersWiFiManager handle it
     }
 
     // dummy commands
@@ -9574,6 +9591,9 @@ void startWebserver()
             request->beginResponse(200, "application/json", "true");
         request->send(response);
 
+        // Temporarily enable persistence to save credentials
+        WiFi.persistent(true);
+        
         if (request->arg("n").length()) {     // n holds ssid
             if (request->arg("p").length()) { // p holds password
                 // false = only save credentials, don't connect
@@ -9584,6 +9604,9 @@ void startWebserver()
         } else {
             WiFi.begin();
         }
+        
+        // Disable persistence again to avoid Core 3.1.x bug
+        WiFi.persistent(false);
 
         userCommand = 'u'; // next loop, set wifi station mode and restart device
     });

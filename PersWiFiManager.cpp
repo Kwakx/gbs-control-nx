@@ -21,18 +21,42 @@ PersWiFiManager::PersWiFiManager(AsyncWebServer &s, DNSServer &d)
     _server = &s;
     _dnsServer = &d;
     _apPass = "";
+    _lastConnectionCheck = 0;
+    _connectionLostTime = 0;
 } //PersWiFiManager
 
 bool PersWiFiManager::attemptConnection(const String &ssid, const String &pass)
 {
     //attempt to connect to wifi
+    // Configure WiFi settings to avoid ESP8266 Core 3.1.x bug
+    // Enable persistence only when explicitly saving new credentials
+    if (ssid.length() > 0) {
+        WiFi.persistent(true);  // Save new credentials to flash
+    } else {
+        WiFi.persistent(false); // Use saved credentials without re-writing
+    }
+    WiFi.setAutoConnect(false);
+    WiFi.setAutoReconnect(true);
+    
+    // Ensure WiFi hardware is fully awake and ready
+    WiFi.forceSleepWake();
+    delay(100);
+    
+    // Properly disconnect before mode change
+    WiFi.disconnect(false); // false = don't erase credentials
+    delay(200); // Increased delay for stability
     WiFi.mode(WIFI_STA);
+    delay(200); // Increased delay for stability
     WiFi.hostname(device_hostname_partial); // _full // before WiFi.begin();
+    delay(100); // Give time for hostname to be set
+    
     if (ssid.length()) {
         if (pass.length())
             WiFi.begin(ssid.c_str(), pass.c_str());
         else
             WiFi.begin(ssid.c_str());
+        // Disable persistence after saving
+        WiFi.persistent(false);
     } else {
         WiFi.begin();
     }
@@ -50,8 +74,26 @@ bool PersWiFiManager::attemptConnection(const String &ssid, const String &pass)
 
 void PersWiFiManager::handleWiFi()
 {
-    if (!_connectStartTime)
+    if (!_connectStartTime) {
+        // Routine checks when not in initial connection phase
+        if (WiFi.getMode() == WIFI_STA) {
+            if (WiFi.status() == WL_CONNECTED) {
+                _connectionLostTime = 0; // Reset counter
+            } else {
+                // Not connected
+                if (_connectionLostTime == 0) {
+                    _connectionLostTime = millis();
+                }
+                
+                // If disconnected for more than 30 seconds, try to restart WiFi
+                if ((millis() - _connectionLostTime) > 30000) {
+                     _connectionLostTime = 0;
+                     WiFi.reconnect();
+                }
+            }
+        }
         return;
+    }
 
     if (WiFi.status() == WL_CONNECTED) {
         _connectStartTime = 0;
@@ -72,11 +114,15 @@ void PersWiFiManager::startApMode()
 {
     //start AP mode
     IPAddress apIP(192, 168, 4, 1);
+    WiFi.disconnect(true); // true = erase STA credentials from this session
+    delay(100);
     WiFi.mode(WIFI_AP);
+    delay(100);
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
     _apPass.length() ? WiFi.softAP(getApSsid().c_str(), _apPass.c_str(), 11) : WiFi.softAP(getApSsid().c_str());
 
     _dnsServer->stop();
+    delay(50);
     // set which return code will be used for all other domains (e.g. sending
     // ServerFailure instead of NonExistentDomain will reduce number of queries
     // sent by clients)
