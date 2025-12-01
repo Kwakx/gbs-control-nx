@@ -9,6 +9,7 @@
 #define SOCKETIOCLIENT_H_
 
 #include "WebSockets.h"
+#include "WebSocketsClient.h"
 
 #define EIO_HEARTBEAT_INTERVAL 20000
 
@@ -46,12 +47,25 @@ class SocketIOclient : protected WebSocketsClient {
     SocketIOclient(void);
     virtual ~SocketIOclient(void);
 
-    void begin(const char * host, uint16_t port, const char * url = "/socket.io/?EIO=3", const char * protocol = "arduino");
-    void begin(String host, uint16_t port, String url = "/socket.io/?EIO=3", String protocol = "arduino");
+    void begin(const char * host, uint16_t port, const char * url = "/socket.io/?EIO=3", const char * protocol = "arduino", uint32_t pingInterval = 60 * 1000, uint32_t pongTimeout = 90 * 1000, uint8_t disconnectTimeoutCount = 5);
+    void begin(String host, uint16_t port, String url = "/socket.io/?EIO=3", String protocol = "arduino", uint32_t pingInterval = 60 * 1000, uint32_t pongTimeout = 90 * 1000, uint8_t disconnectTimeoutCount = 5);
 
+#ifdef HAS_SSL
+    void beginSSL(const char * host, uint16_t port, const char * url = "/socket.io/?EIO=3", const char * protocol = "arduino", uint32_t pingInterval = 60 * 1000, uint32_t pongTimeout = 90 * 1000, uint8_t disconnectTimeoutCount = 5);
+    void beginSSL(String host, uint16_t port, String url = "/socket.io/?EIO=3", String protocol = "arduino", uint32_t pingInterval = 60 * 1000, uint32_t pongTimeout = 90 * 1000, uint8_t disconnectTimeoutCount = 5);
+#ifndef SSL_AXTLS
+    void beginSSLWithCA(const char * host, uint16_t port, const char * url = "/socket.io/?EIO=3", const char * CA_cert = NULL, const char * protocol = "arduino", uint32_t pingInterval = 60 * 1000, uint32_t pongTimeout = 90 * 1000, uint8_t disconnectTimeoutCount = 5);
+    void setSSLClientCertKey(const char * clientCert = NULL, const char * clientPrivateKey = NULL);
+#if defined(SSL_BARESSL)
+    void beginSSLWithCA(const char * host, uint16_t port, const char * url = "/socket.io/?EIO=3", BearSSL::X509List * CA_cert = NULL, const char * protocol = "arduino", uint32_t pingInterval = 60 * 1000, uint32_t pongTimeout = 90 * 1000, uint8_t disconnectTimeoutCount = 5);
+    void setSSLClientCertKey(BearSSL::X509List * clientCert = NULL, BearSSL::PrivateKey * clientPrivateKey = NULL);
+#endif
+#endif
+#endif
     bool isConnected(void);
 
     void onEvent(SocketIOclientEvent cbEvent);
+    void disconnect(void);
 
     bool sendEVENT(uint8_t * payload, size_t length = 0, bool headerToPayload = false);
     bool sendEVENT(const uint8_t * payload, size_t length = 0);
@@ -59,9 +73,21 @@ class SocketIOclient : protected WebSocketsClient {
     bool sendEVENT(const char * payload, size_t length = 0);
     bool sendEVENT(String & payload);
 
+    bool send(socketIOmessageType_t type, uint8_t * payload, size_t length = 0, bool headerToPayload = false);
+    bool send(socketIOmessageType_t type, const uint8_t * payload, size_t length = 0);
+    bool send(socketIOmessageType_t type, char * payload, size_t length = 0, bool headerToPayload = false);
+    bool send(socketIOmessageType_t type, const char * payload, size_t length = 0);
+    bool send(socketIOmessageType_t type, String & payload);
+
+    void setExtraHeaders(const char * extraHeaders = NULL);
+    void setReconnectInterval(unsigned long time);
+
     void loop(void);
 
+    void configureEIOping(bool disableHeartbeat = false);
+
   protected:
+    bool _disableHeartbeat  = false;
     uint64_t _lastHeartbeat = 0;
     SocketIOclientEvent _cbEvent;
     virtual void runIOCbEvent(socketIOmessageType_t type, uint8_t * payload, size_t length) {
@@ -69,6 +95,8 @@ class SocketIOclient : protected WebSocketsClient {
             _cbEvent(type, payload, length);
         }
     }
+
+    void initClient(void);
 
     // Handeling events from websocket layer
     virtual void runCbEvent(WStype_t type, uint8_t * payload, size_t length) {
