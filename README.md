@@ -1,5 +1,48 @@
 # gbs-control
 
+## About This Fork
+
+This is a modified fork adapted for building and flashing exclusively through PlatformIO. This is my attempt to improve the original repository. My main motivation was to stabilize WiFi issues that were present in the original codebase. I'm not submitting merge requests to the original repo due to vibe coding. I test this fork on a GBSC board purchased from AliExpress.
+
+**Latest releases available at:** https://github.com/Kwakx/gbs-control-nx/releases
+
+---
+
+## Building and Installation
+
+**Important Notes:**
+- **Do not use the original Arduino IDE installation instructions** - This fork is adapted exclusively for PlatformIO
+- **PlatformIO automatically downloads the latest required libraries** for the project - no manual library installation needed
+
+This project uses PlatformIO for building and flashing. Follow these steps to set up your development environment:
+
+1. **Install Visual Studio Code**
+   - Download and install from: https://code.visualstudio.com/
+
+2. **Install PlatformIO Extension**
+   - Open VS Code
+   - Go to Extensions (Ctrl+Shift+X)
+   - Search for "PlatformIO IDE" and install it
+   - Restart VS Code after installation
+
+3. **Configure Your Board**
+   - Open the project in VS Code
+   - Edit `platformio.ini` file
+   - Change the `board` setting to match your specific ESP8266 board model
+   - Save the configuration file
+
+4. **Build and Upload**
+   - Open PlatformIO PROJECT TASKS sidebar (PlatformIO icon in the left sidebar)
+   - Navigate to your project environment (e.g., "gbsc")
+   - Follow these steps in order:
+     1. **General** → **Build** - Compile the firmware
+     2. **Platform** → **Erase Flash** - Erase the flash (recommended for clean install)
+     3. **General** → **Upload** - Flash the firmware to your board
+
+For detailed documentation, visit: https://docs.platformio.org/en/latest/integration/ide/vscode.html#installation
+
+---
+
 Documentation: https://ramapcsx2.github.io/gbs-control/
 
 Gbscontrol is an alternative firmware for Tvia Trueview5725 based upscalers / video converter boards.  
