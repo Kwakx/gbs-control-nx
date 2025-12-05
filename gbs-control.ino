@@ -26,6 +26,11 @@
 #define HAVE_BUTTONS 0
 #define USE_NEW_OLED_MENU 1
 
+// Firmware version for OTA updates - must match the current GitHub release tag
+// This version is compared with the latest release from GitHub API to determine if update is available
+const char* FIRMWARE_VERSION = "v1.2.0";
+
+
 
 static inline void writeBytes(uint8_t slaveRegister, uint8_t *values, uint8_t numValues);
 const uint8_t *loadPresetFromLittleFS(byte forVideoMode);
@@ -39,6 +44,7 @@ const int pin_switch = 0;          //D3 = GPIO0 pulled HIGH, else boot fail (mid
 #if USE_NEW_OLED_MENU
 #include "OLEDMenuImplementation.h"
 #include "OSDManager.h"
+#include "OTAUpdate.h"
 OLEDMenuManager oledMenu(&display);
 OSDManager osdManager;
 volatile OLEDMenuNav oledNav = OLEDMenuNav::IDLE;
