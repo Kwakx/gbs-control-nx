@@ -15,6 +15,7 @@ enum MenuItemTag: uint16_t {
     MT_RESET_GBS,
     MT_RESTORE_FACTORY,
     MT_RESET_WIFI,
+    MT_CHECK_UPDATE,
 };
 // declarations of resolutionMenuHandler, presetSelectionMenuHandler, presetsCreationMenuHandler, resetMenuHandler, currentSettingHandler, wifiMenuHandler
 bool resolutionMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav nav, bool isFirstTime);
@@ -24,5 +25,6 @@ bool resetMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav 
 bool currentSettingHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav nav, bool isFirstTime);
 bool wifiMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav nav, bool isFirstTime);
 bool OSDHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav nav, bool isFirstTime);
+bool firmwareUpdateMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav nav, bool isFirstTime);
 void initOLEDMenu();
 #endif

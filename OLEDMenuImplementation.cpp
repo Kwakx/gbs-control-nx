@@ -2,7 +2,9 @@
 
 #include <ESP8266WiFi.h>
 #include <LittleFS.h>
+#include <ESPAsyncWebServer.h>
 #include "OLEDMenuImplementation.h"
+#include "OTAUpdate.h"
 #include "options.h"
 #include "tv5725.h"
 #include "slot.h"
@@ -23,6 +25,7 @@ extern userOptions *uopt;
 extern const char *ap_ssid;
 extern const char *ap_password;
 extern const char *device_hostname_full;
+extern const char *FIRMWARE_VERSION;
 extern WebSocketsServer webSocket;
 extern OLEDMenuManager oledMenu;
 extern OSDManager osdManager;
@@ -385,6 +388,297 @@ bool osdMenuHanlder(OLEDMenuManager *manager, OLEDMenuItem *, OLEDMenuNav nav, b
     }
     return true;
 }
+
+// System menu handler - shows firmware version
+bool systemMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav, bool)
+{
+    manager->clearSubItems(item);
+    
+    // Show current firmware version
+    extern const char* FIRMWARE_VERSION;
+    static char versionText[32];
+    sprintf(versionText, "Version: %s", FIRMWARE_VERSION);
+    manager->registerItem(item, 0, versionText);
+    
+    // Add "Check for Update" button
+    manager->registerItem(item, MT_CHECK_UPDATE, IMAGE_ITEM(OM_CHECK_UPDATE), firmwareUpdateMenuHandler);
+    
+    return true;
+}
+
+// Firmware update menu handler
+bool firmwareUpdateMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav nav, bool isFirstTime)
+{
+    static enum UpdateState {
+        STATE_CHECKING,
+        STATE_SHOW_RESULT,
+        STATE_CONFIRM_UPDATE,
+        STATE_DOWNLOADING,
+        STATE_COMPLETE,
+        STATE_ERROR
+    } updateState;
+    
+    static const int RESTART_COUNTDOWN_SECONDS = 5;
+    
+    static String latestVersion = "";
+    static FirmwareUpdater::UpdateStatus updateStatus;
+    static int downloadProgress = 0;
+    static unsigned long stateStartTime = 0;
+    
+    OLEDDisplay *display = manager->getDisplay();
+    
+    if (isFirstTime) {
+        updateState = STATE_CHECKING;
+        latestVersion = "";
+        downloadProgress = 0;
+        stateStartTime = millis();
+        manager->freeze();
+        
+        // Close WebSocket and web server to free memory
+        extern WebSocketsServer webSocket;
+        extern AsyncWebServer server;
+        
+        Serial.println(F("[Menu] Stopping web services for update..."));
+        webSocket.close();
+        server.end();
+        
+        // Clear display to free frame buffer memory
+        display->clear();
+        display->display();
+        
+        // Wait longer for connections to close and memory to be freed
+        delay(1000);
+        yield();
+        
+        Serial.print(F("[Menu] Free heap after cleanup: "));
+        Serial.println(ESP.getFreeHeap());
+    }
+    
+    display->clear();
+    display->setColor(OLEDDISPLAY_COLOR::WHITE);
+    display->setFont(ArialMT_Plain_16);
+    display->setTextAlignment(OLEDDISPLAY_TEXT_ALIGNMENT::TEXT_ALIGN_CENTER);
+    
+    switch (updateState) {
+        case STATE_CHECKING:
+            display->drawXbm(CENTER_IMAGE(TEXT_CHECKING));
+            display->display();
+            
+            // Check for update
+            updateStatus = FirmwareUpdater::checkForUpdate(latestVersion);
+            
+            if (updateStatus == FirmwareUpdater::UPDATE_AVAILABLE) {
+                updateState = STATE_CONFIRM_UPDATE;
+            } else {
+                updateState = STATE_SHOW_RESULT;
+            }
+            stateStartTime = millis();
+            break;
+            
+        case STATE_SHOW_RESULT:
+            if (updateStatus == FirmwareUpdater::UP_TO_DATE) {
+                display->drawXbm(CENTER_IMAGE(TEXT_UP_TO_DATE));
+                extern const char* FIRMWARE_VERSION;
+                display->setFont(ArialMT_Plain_10);
+                display->setTextAlignment(OLEDDISPLAY_TEXT_ALIGNMENT::TEXT_ALIGN_CENTER);
+                display->drawString(OLED_MENU_WIDTH / 2, 36, FIRMWARE_VERSION);
+            } else if (updateStatus == FirmwareUpdater::WIFI_NOT_CONNECTED) {
+                display->drawXbm(CENTER_IMAGE(TEXT_WIFI_NOT_CONNECTED));
+            } else {
+                display->drawXbm(CENTER_IMAGE(TEXT_CHECK_FAILED));
+            }
+            display->display();
+            
+            // Auto-return after 3 seconds
+            if (millis() - stateStartTime > 3000 || nav != OLEDMenuNav::IDLE) {
+                // Restart web server if it was stopped for update
+                extern WebSocketsServer webSocket;
+                extern AsyncWebServer server;
+                extern runTimeOptions *rto;
+                
+                if (rto->webServerEnabled) {
+                    Serial.println(F("[Menu] Restarting web services..."));
+                    server.begin();
+                    webSocket.begin();
+                    rto->webServerStarted = true;
+                }
+                
+                manager->unfreeze();
+                return false;
+            }
+            break;
+            
+        case STATE_CONFIRM_UPDATE:
+            display->drawXbm((OLED_MENU_WIDTH - TEXT_UPDATE_FOUND_WIDTH) / 2, 0, IMAGE_ITEM(TEXT_UPDATE_FOUND));
+            display->setFont(ArialMT_Plain_10);
+            display->setTextAlignment(OLEDDISPLAY_TEXT_ALIGNMENT::TEXT_ALIGN_LEFT);
+            display->drawString(0, 18, String("Current: ") + String(FIRMWARE_VERSION));
+            display->drawString(0, 30, String("Latest: ") + latestVersion);
+            display->setTextAlignment(OLEDDISPLAY_TEXT_ALIGNMENT::TEXT_ALIGN_CENTER);
+            display->setFont(ArialMT_Plain_10);
+            display->drawString(OLED_MENU_WIDTH / 2, 44, "ENTER = Update");
+            display->drawString(OLED_MENU_WIDTH / 2, 54, "DOWN = Cancel");
+            display->display();
+            
+            if (nav == OLEDMenuNav::ENTER) {
+                updateState = STATE_DOWNLOADING;
+                stateStartTime = millis();
+            } else if (nav == OLEDMenuNav::DOWN) {
+                manager->unfreeze();
+                return false;
+            }
+            break;
+            
+        case STATE_DOWNLOADING: {
+            // Start update if not already started
+            if (millis() - stateStartTime < 500) {
+                display->drawXbm((OLED_MENU_WIDTH - TEXT_DOWNLOADING_WIDTH) / 2, 10, IMAGE_ITEM(TEXT_DOWNLOADING));
+                display->setFont(ArialMT_Plain_10);
+                
+                // Draw initial progress bar
+                int barWidth = 100;
+                int barHeight = 10;
+                int barX = (OLED_MENU_WIDTH - barWidth) / 2;
+                int barY = 35;
+                display->drawRect(barX, barY, barWidth, barHeight);
+                display->drawString(OLED_MENU_WIDTH / 2, 50, "0%");
+                display->display();
+                break;
+            }
+            
+            if (downloadProgress == 0) {
+                // Set static pointers for callback (safe during update as only one update at a time)
+                static OLEDMenuManager* callbackManager = nullptr;
+                static int* callbackProgress = nullptr;
+                callbackManager = manager;
+                callbackProgress = &downloadProgress;
+                
+                // Perform update with progress callback that updates display
+                updateStatus = FirmwareUpdater::performUpdate([](int progress) {
+                    *callbackProgress = progress;
+                    
+                    // Update display in real-time
+                    OLEDDisplay *display = callbackManager->getDisplay();
+                    display->clear();
+                    display->setColor(OLEDDISPLAY_COLOR::WHITE);
+                    display->setTextAlignment(OLEDDISPLAY_TEXT_ALIGNMENT::TEXT_ALIGN_CENTER);
+                    display->drawXbm((OLED_MENU_WIDTH - TEXT_DOWNLOADING_WIDTH) / 2, 10, IMAGE_ITEM(TEXT_DOWNLOADING));
+                    display->setFont(ArialMT_Plain_10);
+                    
+                    // Draw progress bar
+                    int barWidth = 100;
+                    int barHeight = 10;
+                    int barX = (OLED_MENU_WIDTH - barWidth) / 2;
+                    int barY = 35;
+                    display->drawRect(barX, barY, barWidth, barHeight);
+                    int fillWidth = (barWidth - 2) * progress / 100;
+                    if (fillWidth > 0) {
+                        display->fillRect(barX + 1, barY + 1, fillWidth, barHeight - 2);
+                    }
+                    
+                    String progressText = String(progress) + "%";
+                    display->drawString(OLED_MENU_WIDTH / 2, 50, progressText);
+                    display->display();
+                });
+                
+                if (updateStatus == FirmwareUpdater::SUCCESS) {
+                    updateState = STATE_COMPLETE;
+                    stateStartTime = millis(); // Start countdown timer
+                } else {
+                    updateState = STATE_ERROR;
+                    stateStartTime = millis();
+                }
+            }
+            break;
+        }
+            
+        case STATE_COMPLETE: {
+            // Calculate remaining seconds
+            unsigned long elapsed = millis() - stateStartTime;
+            int remainingSeconds = RESTART_COUNTDOWN_SECONDS - (elapsed / 1000);
+            
+            if (remainingSeconds <= 0) {
+                // Time's up - restart now
+                display->clear();
+                display->setColor(OLEDDISPLAY_COLOR::WHITE);
+                display->drawXbm(CENTER_IMAGE(TEXT_REBOOTING));
+                display->display();
+                delay(500);
+                ESP.restart();
+                break;
+            }
+            
+            // Update display with countdown
+            display->clear();
+            display->setColor(OLEDDISPLAY_COLOR::WHITE);
+            display->setTextAlignment(OLEDDISPLAY_TEXT_ALIGNMENT::TEXT_ALIGN_CENTER);
+            display->drawXbm(CENTER_IMAGE(TEXT_UPDATE_SUCCESS));
+            display->setFont(ArialMT_Plain_10);
+            
+            char countdownText[32];
+            sprintf(countdownText, "Restart in %d...", remainingSeconds);
+            display->drawString(OLED_MENU_WIDTH / 2, 35, countdownText);
+            display->display();
+            break;
+        }
+            
+        case STATE_ERROR: {
+            display->clear();
+            display->setColor(OLEDDISPLAY_COLOR::WHITE);
+            display->setTextAlignment(OLEDDISPLAY_TEXT_ALIGNMENT::TEXT_ALIGN_CENTER);
+            
+            // Display specific error message based on update status
+            switch (updateStatus) {
+                case FirmwareUpdater::WIFI_NOT_CONNECTED:
+                    display->drawXbm(CENTER_IMAGE(TEXT_WIFI_NOT_CONNECTED));
+                    break;
+                case FirmwareUpdater::CHECK_FAILED:
+                    display->drawXbm(CENTER_IMAGE(TEXT_CHECK_FAILED));
+                    break;
+                case FirmwareUpdater::DOWNLOAD_FAILED:
+                    display->drawXbm(CENTER_IMAGE(TEXT_DOWNLOAD_FAILED));
+                    break;
+                case FirmwareUpdater::FLASH_FAILED:
+                    display->drawXbm(CENTER_IMAGE(TEXT_FLASH_FAILED));
+                    break;
+                case FirmwareUpdater::CHECKSUM_FAILED:
+                    display->drawXbm(CENTER_IMAGE(TEXT_CHECKSUM_ERROR));
+                    display->drawXbm((OLED_MENU_WIDTH - TEXT_SHA256_MISMATCH_WIDTH) / 2, TEXT_CHECKSUM_ERROR_HEIGHT + 10, IMAGE_ITEM(TEXT_SHA256_MISMATCH));
+                    break;
+                case FirmwareUpdater::INSUFFICIENT_SPACE:
+                    display->drawXbm(CENTER_IMAGE(TEXT_NOT_ENOUGH_SPACE));
+                    display->drawXbm((OLED_MENU_WIDTH - TEXT_FREE_FLASH_MEMORY_WIDTH) / 2, TEXT_NOT_ENOUGH_SPACE_HEIGHT + 10, IMAGE_ITEM(TEXT_FREE_FLASH_MEMORY));
+                    break;
+                default:
+                    display->drawXbm(CENTER_IMAGE(TEXT_UPDATE_FAILED));
+                    display->drawXbm((OLED_MENU_WIDTH - TEXT_UNKNOWN_ERROR_WIDTH) / 2, TEXT_UPDATE_FAILED_HEIGHT + 10, IMAGE_ITEM(TEXT_UNKNOWN_ERROR));
+                    break;
+            }
+            display->display();
+            
+            if (millis() - stateStartTime > 5000 || nav != OLEDMenuNav::IDLE) {
+                // Restart web server if it was stopped for update
+                extern WebSocketsServer webSocket;
+                extern AsyncWebServer server;
+                extern runTimeOptions *rto;
+                
+                if (rto->webServerEnabled) {
+                    Serial.println(F("[Menu] Restarting web services after failed update..."));
+                    server.begin();
+                    webSocket.begin();
+                    rto->webServerStarted = true;
+                }
+                
+                manager->unfreeze();
+                return false;
+            }
+            break;
+        }
+    }
+    
+    return true;
+}
+
 void initOLEDMenu()
 {
     OLEDMenuItem *root = oledMenu.rootItem;
@@ -411,6 +705,9 @@ void initOLEDMenu()
 
     // Current Settings
     oledMenu.registerItem(root, MT_NULL, IMAGE_ITEM(OM_CURRENT), currentSettingHandler);
+
+    // System (contains firmware version and update check)
+    oledMenu.registerItem(root, MT_NULL, IMAGE_ITEM(OM_SYSTEM), systemMenuHandler);
 
     // Reset (Misc.)
     OLEDMenuItem *resetMenu = oledMenu.registerItem(root, MT_NULL, IMAGE_ITEM(OM_RESET_RESTORE));

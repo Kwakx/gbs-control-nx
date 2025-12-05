@@ -88,17 +88,17 @@ menu_items = [
     {
         "tag": "TEXT_RESETTING_GBS",
         "en-US": "Resetting GBS\nPlease wait\n...",
-        "size": 16,
+        "size": 14,
     },
     {
         "tag": "TEXT_RESETTING_WIFI",
         "en-US": "Resetting WiFi\nPlease wait\n...",
-        "size": 16,
+        "size": 12,
     },
     {
         "tag": "TEXT_RESTORING",
         "en-US": "Factory Restoring\nPlease wait\n...",
-        "size": 16,
+        "size": 12,
     },
     {
         "tag": "TEXT_WIFI_CONNECT_TO",
@@ -129,6 +129,94 @@ menu_items = [
     {
         "tag": "OM_OSD",
         "en-US": "Open OSD Menu",
+    },
+    {
+        "tag": "OM_SYSTEM",
+        "en-US": "System",
+    },
+    {
+        "tag": "OM_CHECK_UPDATE",
+        "en-US": "Check for Update",
+    },
+    {
+        "tag": "TEXT_CHECKING",
+        "en-US": "Checking...",
+        "size": 16,
+    },
+    {
+        "tag": "TEXT_UP_TO_DATE",
+        "en-US": "Up to date!",
+        "size": 16,
+    },
+    {
+        "tag": "TEXT_WIFI_NOT_CONNECTED",
+        "en-US": "WiFi not connected",
+        "size": 12,
+    },
+    {
+        "tag": "TEXT_CHECK_FAILED",
+        "en-US": "Check failed",
+        "size": 16,
+    },
+    {
+        "tag": "TEXT_UPDATE_FOUND",
+        "en-US": "Update found!",
+        "size": 16,
+    },
+    {
+        "tag": "TEXT_DOWNLOADING",
+        "en-US": "Downloading...",
+        "size": 12,
+    },
+    {
+        "tag": "TEXT_UPDATE_SUCCESS",
+        "en-US": "Update Success!",
+        "size": 12,
+    },
+    {
+        "tag": "TEXT_REBOOTING",
+        "en-US": "Rebooting...",
+        "size": 12,
+    },
+    {
+        "tag": "TEXT_UPDATE_FAILED",
+        "en-US": "Update failed",
+        "size": 16,
+    },
+    {
+        "tag": "TEXT_DOWNLOAD_FAILED",
+        "en-US": "Download failed",
+        "size": 12,
+    },
+    {
+        "tag": "TEXT_FLASH_FAILED",
+        "en-US": "Flash failed",
+        "size": 16,
+    },
+    {
+        "tag": "TEXT_CHECKSUM_ERROR",
+        "en-US": "Checksum error",
+        "size": 12,
+    },
+    {
+        "tag": "TEXT_SHA256_MISMATCH",
+        "en-US": "SHA256 mismatch",
+        "size": 10,
+    },
+    {
+        "tag": "TEXT_NOT_ENOUGH_SPACE",
+        "en-US": "Not enough space",
+        "size": 12,
+    },
+    {
+        "tag": "TEXT_FREE_FLASH_MEMORY",
+        "en-US": "Free flash memory",
+        "size": 10,
+    },
+    {
+        "tag": "TEXT_UNKNOWN_ERROR",
+        "en-US": "Unknown error",
+        "size": 10,
     },
 
 
