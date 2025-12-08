@@ -209,7 +209,9 @@ struct adcOptions *adco = &adcopts;
 String slotIndexMap = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~()!*:,";
 
 char serialCommand;               // Serial / Web Server commands
+String serialCommandBuffer = "";  // Buffering for Web Server commands
 char userCommand;               // Serial / Web Server commands
+String userCommandBuffer = "";  // Buffering for Web Server commands
 static uint8_t lastSegment = 0xFF; // GBS segment for direct access
 //uint8_t globalDelay; // used for dev / debug
 
@@ -219,10 +221,8 @@ class SerialMirror : public Stream
 {
     size_t write(const uint8_t *data, size_t size)
     {
-        if (ESP.getFreeHeap() > 20000) {
+        if (ESP.getFreeHeap() > 10000) {
             webSocket.broadcastTXT(data, size);
-        } else {
-            webSocket.disconnect();
         }
         Serial.write(data, size);
         return size;
@@ -230,10 +230,8 @@ class SerialMirror : public Stream
 
     size_t write(const char *data, size_t size)
     {
-        if (ESP.getFreeHeap() > 20000) {
+        if (ESP.getFreeHeap() > 10000) {
             webSocket.broadcastTXT(data, size);
-        } else {
-            webSocket.disconnect();
         }
         Serial.write(data, size);
         return size;
@@ -241,10 +239,8 @@ class SerialMirror : public Stream
 
     size_t write(uint8_t data)
     {
-        if (ESP.getFreeHeap() > 20000) {
+        if (ESP.getFreeHeap() > 10000) {
             webSocket.broadcastTXT(&data, 1);
-        } else {
-            webSocket.disconnect();
         }
         Serial.write(data);
         return 1;
@@ -7734,10 +7730,8 @@ void updateWebSocketData()
             }
 
             // send ping and stats
-            if (ESP.getFreeHeap() > 14000) {
+            if (ESP.getFreeHeap() > 6000) {
                 webSocket.broadcastTXT(toSend, MESSAGE_LEN);
-            } else {
-                webSocket.disconnect();
             }
         }
     }
@@ -7814,6 +7808,9 @@ void loop()
     // Serial takes precedence
     if (Serial.available()) {
         serialCommand = Serial.read();
+    } else if (serialCommandBuffer.length() > 0) {
+        serialCommand = serialCommandBuffer.charAt(0);
+        serialCommandBuffer.remove(0, 1);
     } else if (inputStage > 0) {
         // multistage with no more data
         SerialM.println(F(" abort"));
@@ -8689,6 +8686,11 @@ void loop()
             }
             handleWiFi(1);
         }
+    }
+
+    if (userCommand == '@' && userCommandBuffer.length() > 0) {
+        userCommand = userCommandBuffer.charAt(0);
+        userCommandBuffer.remove(0, 1);
     }
 
     if (userCommand != '@') {
@@ -9567,11 +9569,11 @@ void startWebserver()
             if (params > 0) {
                 const AsyncWebParameter *p = request->getParam(0);
                 //Serial.println(p->name());
-                serialCommand = p->name().charAt(0);
+                serialCommandBuffer += p->name().charAt(0);
 
                 // hack, problem with '+' command received via url param
-                if (serialCommand == ' ') {
-                    serialCommand = '+';
+                if (serialCommandBuffer.charAt(serialCommandBuffer.length() - 1) == ' ') {
+                    serialCommandBuffer.setCharAt(serialCommandBuffer.length() - 1, '+');
                 }
             }
             request->send(200); // reply
@@ -9586,7 +9588,7 @@ void startWebserver()
             if (params > 0) {
                 const AsyncWebParameter *p = request->getParam(0);
                 //Serial.println(p->name());
-                userCommand = p->name().charAt(0);
+                userCommandBuffer += p->name().charAt(0);
             }
             request->send(200); // reply
         }
