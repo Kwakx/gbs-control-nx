@@ -216,60 +216,75 @@ static uint8_t lastSegment = 0xFF; // GBS segment for direct access
 //uint8_t globalDelay; // used for dev / debug
 
 #if defined(ESP8266)
-// serial mirror class for websocket logs
+// Buffered serial mirror class for websocket logs
+// 
+// Why buffering?
+// - printf() calls write() for each character individually, creating separate WebSocket frames
+// - Buffering collects characters and sends them as a single frame (on newline or buffer full)
+// - String concatenation would also fragment heap; this 128-byte static buffer is predictable
+// - Works automatically for all SerialM.print/println/printf calls
 class SerialMirror : public Stream
 {
-    size_t write(const uint8_t *data, size_t size)
-    {
-        if (ESP.getFreeHeap() > 10000) {
-            webSocket.broadcastTXT(data, size);
+private:
+    static constexpr size_t WS_BUFFER_SIZE = 128;
+    char wsBuffer[WS_BUFFER_SIZE];
+    size_t wsBufferPos = 0;
+    unsigned long lastFlushTime = 0;
+    static constexpr unsigned long FLUSH_INTERVAL_MS = 50;
+
+    void flushToWebSocket() {
+        if (wsBufferPos > 0 && ESP.getFreeHeap() > 10000) {
+            webSocket.broadcastTXT((uint8_t*)wsBuffer, wsBufferPos);
+        }
+        wsBufferPos = 0;
+        lastFlushTime = millis();
+    }
+
+    void addToBuffer(char c) {
+        if (wsBufferPos >= WS_BUFFER_SIZE - 1) {
+            flushToWebSocket();
+        }
+        wsBuffer[wsBufferPos++] = c;
+        
+        // Flush on newline or after interval
+        if (c == '\n' || (millis() - lastFlushTime) > FLUSH_INTERVAL_MS) {
+            flushToWebSocket();
+        }
+    }
+
+public:
+    size_t write(const uint8_t *data, size_t size) {
+        for (size_t i = 0; i < size; i++) {
+            addToBuffer((char)data[i]);
         }
         Serial.write(data, size);
         return size;
     }
 
-    size_t write(const char *data, size_t size)
-    {
-        if (ESP.getFreeHeap() > 10000) {
-            webSocket.broadcastTXT(data, size);
+    size_t write(const char *data, size_t size) {
+        for (size_t i = 0; i < size; i++) {
+            addToBuffer(data[i]);
         }
         Serial.write(data, size);
         return size;
     }
 
-    size_t write(uint8_t data)
-    {
-        if (ESP.getFreeHeap() > 10000) {
-            webSocket.broadcastTXT(&data, 1);
-        }
+    size_t write(uint8_t data) {
+        addToBuffer((char)data);
         Serial.write(data);
         return 1;
     }
 
-    size_t write(char data)
-    {
-        if (ESP.getFreeHeap() > 20000) {
-            webSocket.broadcastTXT(&data, 1);
-        } else {
-            webSocket.disconnect();
-        }
+    size_t write(char data) {
+        addToBuffer(data);
         Serial.write(data);
         return 1;
     }
 
-    int available()
-    {
-        return 0;
-    }
-    int read()
-    {
-        return -1;
-    }
-    int peek()
-    {
-        return -1;
-    }
-    void flush() {}
+    int available() { return 0; }
+    int read() { return -1; }
+    int peek() { return -1; }
+    void flush() { flushToWebSocket(); }
 };
 
 SerialMirror SerialM;
@@ -7746,7 +7761,7 @@ void handleWiFi(boolean instant)
         dnsServer.processNextRequest();
 
         if ((millis() - lastTimePing) > 953) { // slightly odd value so not everything happens at once
-            webSocket.broadcastPing();
+            // Note: ping/pong now handled by webSocket.enableHeartbeat() in setup()
         }
         if (((millis() - lastTimePing) > 973) || instant) {
             if ((webSocket.connectedClients(false) > 0) || instant) { // true = with compliant ping
@@ -9927,6 +9942,9 @@ void startWebserver()
 
     server.begin();    // Webserver for the site
     webSocket.begin(); // Websocket for interaction
+    // Enable heartbeat: ping every 2000ms, pong timeout 3000ms, disconnect after 2 missed pongs
+    // This keeps the connection alive during idle periods (client has 2.7s timeout)
+    webSocket.enableHeartbeat(2000, 3000, 2);
     yield();
 
 #ifdef HAVE_PINGER_LIBRARY
