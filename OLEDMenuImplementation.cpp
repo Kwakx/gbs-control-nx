@@ -197,7 +197,8 @@ bool resetMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav,
             break;
     }
     display->display();
-    webSocket.close();
+    // Drop all websocket clients but keep the server running
+    webSocket.disconnect();
     delay(50);
     switch (item->tag) {
         case MT_RESET_WIFI:
@@ -439,7 +440,9 @@ bool firmwareUpdateMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLE
         extern AsyncWebServer server;
         
         Serial.println(F("[Menu] Stopping web services for update..."));
-        webSocket.close();
+        // Only drop WS clients (closing/rewrapping the server causes rebind issues)
+        webSocket.disconnect();
+        // HTTP server must be stopped to free resources / avoid handling requests
         server.end();
         
         // Clear display to free frame buffer memory
@@ -491,15 +494,13 @@ bool firmwareUpdateMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLE
             
             // Auto-return after 3 seconds
             if (millis() - stateStartTime > 3000 || nav != OLEDMenuNav::IDLE) {
-                // Restart web server if it was stopped for update
-                extern WebSocketsServer webSocket;
+                // Restart web server; WS server stayed up, only clients were dropped
                 extern AsyncWebServer server;
                 extern runTimeOptions *rto;
                 
                 if (rto->webServerEnabled) {
                     Serial.println(F("[Menu] Restarting web services..."));
                     server.begin();
-                    webSocket.begin();
                     rto->webServerStarted = true;
                 }
                 
@@ -524,6 +525,14 @@ bool firmwareUpdateMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLE
                 updateState = STATE_DOWNLOADING;
                 stateStartTime = millis();
             } else if (nav == OLEDMenuNav::DOWN) {
+                // User canceled: bring web services back up
+                extern AsyncWebServer server;
+                extern runTimeOptions *rto;
+                if (rto->webServerEnabled) {
+                    Serial.println(F("[Menu] Update canceled, restarting web services..."));
+                    server.begin();
+                    rto->webServerStarted = true;
+                }
                 manager->unfreeze();
                 return false;
             }
@@ -657,15 +666,13 @@ bool firmwareUpdateMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLE
             display->display();
             
             if (millis() - stateStartTime > 5000 || nav != OLEDMenuNav::IDLE) {
-                // Restart web server if it was stopped for update
-                extern WebSocketsServer webSocket;
+                // Restart web server; WS server stayed up, only clients were dropped
                 extern AsyncWebServer server;
                 extern runTimeOptions *rto;
                 
                 if (rto->webServerEnabled) {
                     Serial.println(F("[Menu] Restarting web services after failed update..."));
                     server.begin();
-                    webSocket.begin();
                     rto->webServerStarted = true;
                 }
                 

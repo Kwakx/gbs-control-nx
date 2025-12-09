@@ -28,7 +28,7 @@
 
 // Firmware version for OTA updates - must match the current GitHub release tag
 // This version is compared with the latest release from GitHub API to determine if update is available
-const char* FIRMWARE_VERSION = "v1.2.2";
+const char* FIRMWARE_VERSION = "v1.2.3";
 
 
 
@@ -8983,7 +8983,7 @@ void handleType2Command(char argument)
             break;
         case '1':
             // reset to defaults button
-            webSocket.close();
+            webSocket.disconnect();
             loadDefaultUserOptions();
             saveUserPrefs();
             Serial.println(F("options set to defaults, restarting"));
@@ -9045,7 +9045,7 @@ void handleType2Command(char argument)
             //
             break;
         case 'a':
-            webSocket.close();
+            webSocket.disconnect();
             Serial.println(F("restart"));
             delay(60);
             ESP.reset(); // don't use restart(), messes up websocket reconnects
@@ -10725,7 +10725,7 @@ void settingsMenuOLED()
                 display.drawString(0, 30, "Please Wait...");
                 display.display();
             }
-            webSocket.close();
+            webSocket.disconnect();
             delay(60);
             ESP.reset();
             oled_selectOption = 0;
@@ -10740,7 +10740,7 @@ void settingsMenuOLED()
                 display.drawString(0, 30, "Please Wait...");
                 display.display();
             }
-            webSocket.close();
+            webSocket.disconnect();
             loadDefaultUserOptions();
             saveUserPrefs();
             delay(60);
