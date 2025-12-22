@@ -12,7 +12,7 @@ Any suggestions or issues are welcome.
 
 **⚠️ Not Supported ESP32 Variants:**
 - ESP32-S3-DevKitC:
-- ESP32-C3/C6/S2/H2
+- ESP32-H2/H4/C2/C3/C5/C61/C6/S2/P4
 
 For pin connections and wiring information, see **[PINOUT.md](PINOUT.md)**.
 
@@ -50,3 +50,4 @@ For detailed documentation, visit: https://docs.platformio.org/en/latest/integra
 ---
 
 Original gbs-control documentation: https://ramapcsx2.github.io/gbs-control/, oiginal repo: https://github.com/ramapcsx2/gbs-control with information about this project.
+
