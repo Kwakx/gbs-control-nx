@@ -40,11 +40,11 @@ private:
     static String _expectedSha256;
     static bool _updateChecked;
 
-    // Parse GitHub API JSON response
-    static bool parseReleaseInfo(const String& json, String& version, String& downloadUrl, String& expectedSha256);
+    // Parse GitHub API JSON response from stream
+    static bool parseReleaseInfo(Stream& stream, String& version, String& downloadUrl, String& expectedSha256);
     
-    // Extract JSON field value (simple parser to avoid ArduinoJson dependency)
-    static String extractJsonString(const String& json, const String& key);
+    // Helper to read JSON string value from stream
+    static String readJsonString(Stream& stream);
     
     // Resolve GitHub redirect to final CDN URL (avoids double SSL handshake)
     static String resolveRedirect(const String& url);

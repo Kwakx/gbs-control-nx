@@ -109,14 +109,17 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::checkForUpdate(String& latestVers
         return CHECK_FAILED;
     }
 
-    String payload = https.getString();
-    https.end();
+    // Get the stream from HTTP client
+    WiFiClient& stream = https.getStream();
 
-    // Parse the JSON response
-    if (!parseReleaseInfo(payload, _latestVersion, _downloadUrl, _expectedSha256)) {
+    // Parse the JSON response from stream
+    if (!parseReleaseInfo(stream, _latestVersion, _downloadUrl, _expectedSha256)) {
         Serial.println(F("[OTA] Failed to parse release info"));
+        https.end();
         return CHECK_FAILED;
     }
+    
+    https.end();
     
     // SHA256 digest is required
     if (_expectedSha256.isEmpty()) {
@@ -562,77 +565,89 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::checkAndUpdate(void (*progressCal
     return checkStatus;
 }
 
-bool FirmwareUpdater::parseReleaseInfo(const String& json, String& version, String& downloadUrl, String& expectedSha256) {
-    // Extract tag_name (version)
-    version = extractJsonString(json, "tag_name");
+bool FirmwareUpdater::parseReleaseInfo(Stream& stream, String& version, String& downloadUrl, String& expectedSha256) {
+    // 1. Find tag_name
+    if (!stream.find("\"tag_name\":")) {
+        return false;
+    }
+    version = readJsonString(stream);
     if (version.isEmpty()) {
         return false;
     }
 
-    // Find the firmware.bin asset in the assets array
-    int assetsStart = json.indexOf("\"assets\":");
-    if (assetsStart == -1) {
+    // 2. Find assets array
+    if (!stream.find("\"assets\":")) {
         return false;
     }
 
-    int assetArrayStart = json.indexOf('[', assetsStart);
-    int assetArrayEnd = json.indexOf(']', assetArrayStart);
-    
-    if (assetArrayStart == -1 || assetArrayEnd == -1) {
-        return false;
-    }
-
-    String assetsSection = json.substring(assetArrayStart, assetArrayEnd);
-
-    // Look for firmware.bin asset
+    // 3. Find our firmware asset
 #ifdef ESP32
     String firmwareName = "firmware_esp32.bin";
 #else
     String firmwareName = "firmware.bin";
 #endif
-    int nameIndex = assetsSection.indexOf("\"name\":\"" + firmwareName + "\"");
-    if (nameIndex == -1) {
+    String searchName = "\"name\":\"" + firmwareName + "\"";
+
+    if (!stream.find(searchName.c_str())) {
         Serial.println(F("[OTA] firmware not found in assets"));
         return false;
     }
 
-    // Find browser_download_url after the firmware.bin name
-    int urlStart = assetsSection.indexOf("\"browser_download_url\":", nameIndex);
-    if (urlStart == -1) {
-        return false;
-    }
-
-    downloadUrl = extractJsonString(assetsSection.substring(urlStart), "browser_download_url");
+    // 4. Find digest and browser_download_url
+    // We search sequentially because Stream.find() consumes the stream.
+    // Based on GitHub API structure, 'digest' typically appears before 'browser_download_url'.
+    // We use a loop to be robust against minor order changes, reading until we find both or stream ends.
+    // This stream-based approach prevents OOM on ESP8266 by avoiding buffering the full JSON.
     
-    // Find digest (SHA256) after the firmware.bin name
-    // Digest format: "sha256:hash" - we need to extract just the hash part
-    int digestStart = assetsSection.indexOf("\"digest\":", nameIndex);
-    if (digestStart != -1) {
-        String digestValue = extractJsonString(assetsSection.substring(digestStart), "digest");
-        if (!digestValue.isEmpty() && digestValue.startsWith("sha256:")) {
-            // Remove "sha256:" prefix
-            expectedSha256 = digestValue.substring(7);
-            expectedSha256.toLowerCase(); // Normalize to lowercase for comparison
+    bool foundUrl = false;
+    bool foundDigest = false;
+    
+    while (stream.available()) {
+        if (!foundDigest) {
+             if (stream.find("\"digest\":")) {
+                 String digestVal = readJsonString(stream);
+                 if (digestVal.startsWith("sha256:")) {
+                     expectedSha256 = digestVal.substring(7);
+                     expectedSha256.toLowerCase();
+                     foundDigest = true;
+                 }
+             }
         }
+        
+        if (!foundUrl) {
+            if (stream.find("\"browser_download_url\":")) {
+                downloadUrl = readJsonString(stream);
+                foundUrl = true;
+            }
+        }
+        
+        if (foundUrl && foundDigest) break;
+        
+        // Break if stream ends to avoid infinite loop
+        if (!stream.available()) break;
     }
     
     return !downloadUrl.isEmpty();
 }
 
-String FirmwareUpdater::extractJsonString(const String& json, const String& key) {
-    String searchKey = "\"" + key + "\":\"";
-    int startIndex = json.indexOf(searchKey);
+String FirmwareUpdater::readJsonString(Stream& stream) {
+    // Expecting: "value" or value (if boolean/number, but here we read strings)
+    // We assume we just matched "key":
+    // So next char should be " or whitespace then "
     
-    if (startIndex == -1) {
-        return "";
+    // Skip until "
+    while (stream.available()) {
+        char c = stream.peek();
+        if (c == '"') {
+            stream.read(); // Consume opening quote
+            break;
+        } else if (isSpace(c)) {
+            stream.read(); // Consume whitespace
+        } else {
+            // Unexpected char or maybe null?
+            return ""; 
+        }
     }
     
-    startIndex += searchKey.length();
-    int endIndex = json.indexOf("\"", startIndex);
-    
-    if (endIndex == -1) {
-        return "";
-    }
-    
-    return json.substring(startIndex, endIndex);
+    return stream.readStringUntil('"');
 }
