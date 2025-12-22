@@ -4,9 +4,23 @@
 // fast digitalRead()
 #if defined(ESP8266)
 #define digitalRead(x) ((GPIO_REG_READ(GPIO_IN_ADDRESS) >> x) & 1)
-#ifndef DEBUG_IN_PIN
-#define DEBUG_IN_PIN D6
-#endif
+#elif defined(ESP32)
+// ESP32 fast read (supports pins 0-39)
+// Notes:
+// - GPIO.in covers 0-31
+// - GPIO.in1 covers 32-39
+static inline uint32_t fastDigitalRead(uint8_t pin)
+{
+    if (pin < 32) {
+        return (GPIO.in >> pin) & 1U;
+    }
+    if (pin < 40) {
+        return (GPIO.in1.val >> (pin - 32)) & 1U;
+    }
+    // Invalid on classic ESP32 (WROOM/WROVER): return 0 for out-of-range pins.
+    return 0;
+}
+#define digitalRead(x) fastDigitalRead((uint8_t)(x))
 #else // Arduino
 // fastest, but non portable (Uno pin 11 = PB3, Mega2560 pin 11 = PB5)
 //#define digitalRead(x) bitRead(PINB, 3)
@@ -15,7 +29,11 @@
 // no define for DEBUG_IN_PIN
 #endif
 
+#ifdef ESP32
+#include <WiFi.h>
+#else
 #include <ESP8266WiFi.h>
+#endif
 
 // FS_DEBUG:      full verbose debug over serial
 // FS_DEBUG_LED:  just blink LED (off = adjust phase, on = normal phase)
@@ -32,6 +50,8 @@
 namespace MeasurePeriod {
     volatile uint32_t stopTime, startTime;
     volatile uint32_t armed;
+    volatile uint32_t isrPrepareCount;
+    volatile uint32_t isrMeasureCount;
 
     void _risingEdgeISR_prepare();
     void _risingEdgeISR_measure();
@@ -40,15 +60,23 @@ namespace MeasurePeriod {
         startTime = 0;
         stopTime = 0;
         armed = 0;
+        isrPrepareCount = 0;
+        isrMeasureCount = 0;
         attachInterrupt(DEBUG_IN_PIN, _risingEdgeISR_prepare, RISING);
     }
 
     void IRAM_ATTR _risingEdgeISR_prepare()
     {
         noInterrupts();
-        //startTime = ESP.getCycleCount();
+        isrPrepareCount++;
+#if defined(ESP32)
+        // ESP32: use micros() so timing is independent of CPU frequency scaling.
+        startTime = (uint32_t)micros();
+#else
+        // ESP8266: cycle counter is stable at fixed CPU freq (commonly 80/160MHz).
         __asm__ __volatile__("rsr %0,ccount"
                             : "=a"(startTime));
+#endif
         detachInterrupt(DEBUG_IN_PIN);
         armed = 1;
         attachInterrupt(DEBUG_IN_PIN, _risingEdgeISR_measure, RISING);
@@ -58,9 +86,13 @@ namespace MeasurePeriod {
     void IRAM_ATTR _risingEdgeISR_measure()
     {
         noInterrupts();
-        //stopTime = ESP.getCycleCount();
+        isrMeasureCount++;
+#if defined(ESP32)
+        stopTime = (uint32_t)micros();
+#else
         __asm__ __volatile__("rsr %0,ccount"
                             : "=a"(stopTime));
+#endif
         detachInterrupt(DEBUG_IN_PIN);
         interrupts();
     }
@@ -120,7 +152,9 @@ private:
     static bool vsyncOutputSample(uint32_t *start, uint32_t *stop)
     {
         yield();
+#ifdef ESP8266
         ESP.wdtDisable();
+#endif
         MeasurePeriod::start();
 
         // typical: 300000 at 80MHz, 600000 at 160MHz
@@ -128,7 +162,12 @@ private:
             if (MeasurePeriod::armed) {
                 MeasurePeriod::armed = 0;
                 delay(7);
+#ifdef ESP8266
                 WiFi.setSleepMode(WIFI_LIGHT_SLEEP);
+#else
+                // ESP32 equivalent?
+                // WiFi.setSleep(true); // maybe?
+#endif
             }
             if (MeasurePeriod::stopTime > 0) {
                 break;
@@ -136,8 +175,10 @@ private:
         }
         *start = MeasurePeriod::startTime;
         *stop = MeasurePeriod::stopTime;
+#ifdef ESP8266
         ESP.wdtEnable(0);
         WiFi.setSleepMode(WIFI_NONE_SLEEP);
+#endif
 
         if ((*start >= *stop) || *stop == 0 || *start == 0) {
             // ESP.getCycleCount() overflow oder no pulse, just fail this round
@@ -368,7 +409,9 @@ public:
     static bool vsyncInputSample(uint32_t *start, uint32_t *stop)
     {
         yield();
+#ifdef ESP8266
         ESP.wdtDisable();
+#endif
         MeasurePeriod::start();
 
         // typical: 300000 at 80MHz, 600000 at 160MHz
@@ -376,7 +419,11 @@ public:
             if (MeasurePeriod::armed) {
                 MeasurePeriod::armed = 0;
                 delay(7);
+#ifdef ESP8266
                 WiFi.setSleepMode(WIFI_LIGHT_SLEEP);
+#else
+                // WiFi.setSleep(true);
+#endif
             }
             if (MeasurePeriod::stopTime > 0) {
                 break;
@@ -384,8 +431,10 @@ public:
         }
         *start = MeasurePeriod::startTime;
         *stop = MeasurePeriod::stopTime;
+#ifdef ESP8266
         ESP.wdtEnable(0);
         WiFi.setSleepMode(WIFI_NONE_SLEEP);
+#endif
 
         if ((*start >= *stop) || *stop == 0 || *start == 0) {
             // ESP.getCycleCount() overflow oder no pulse, just fail this round
@@ -531,8 +580,15 @@ public:
         // ESP32 FPU only accelerates single-precision float add/mul, not divide, not double.
         // https://esp32.com/viewtopic.php?p=82090#p82090
 
-        // ESP CPU cycles/s
-        const float esp8266_clock_freq = ESP.getCpuFreqMHz() * 1000000;
+        // Tick rate for MeasurePeriod timings.
+        // ESP32 uses micros() in MeasurePeriod ISR; ESP8266 uses CPU cycles.
+        uint32_t cpuFreqMHz_raw = ESP.getCpuFreqMHz();
+#if defined(ESP32)
+        const float tickRateHz = 1000000.0f;
+#else
+        const float tickRateHz = cpuFreqMHz_raw * 1000000;
+#endif
+        const float clock_freq = tickRateHz;
 
         // ESP CPU cycles
         int32_t periodInput;  // int32_t periodOutput;
@@ -556,7 +612,7 @@ public:
                 continue;
             }
 
-            fpsInput = esp8266_clock_freq / (float)periodInput;
+            fpsInput = clock_freq / (float)periodInput;
             if (fpsInput < 47.0f || fpsInput > 86.0f) {
                 SerialM.printf(
                     "runFrequency(): fpsInput wrong: %f, retrying...\n",
@@ -573,7 +629,7 @@ public:
                 SerialM.printf("runFrequency(): getPulseTicks failed, retrying...\n");
                 continue;
             }
-            float fpsInput2 = esp8266_clock_freq / (float)periodInput2;
+            float fpsInput2 = clock_freq / (float)periodInput2;
             if (fpsInput2 < 47.0f || fpsInput2 > 86.0f) {
                 SerialM.printf(
                     "runFrequency(): fpsInput2 wrong: %f, retrying...\n",
@@ -607,7 +663,7 @@ public:
         // If latency increases, boost frequency, and vice versa.
         const float latency_err_frames =
             (float)(phase - target) // cycles
-            / esp8266_clock_freq // s
+            / clock_freq // s
             * fpsInput; // frames
 
         // 0.0038f is 2/525, the difference between SNES and Wii 240p.

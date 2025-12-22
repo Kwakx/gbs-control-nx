@@ -5,16 +5,17 @@
    modified for inclusion in gbs-control
    see /3rdparty/PersWiFiManager/ for original code and license
 */
-#if defined(ESP8266)
 #include "PersWiFiManager.h"
 
-// #define WIFI_HTM_PROGMEM
-// #ifdef WIFI_HTM_PROGMEM
-// static const char wifi_htm[] PROGMEM = R"=====(<!DOCTYPE html><html> <head> <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" /> <title>ESP WiFi</title> <script> function setSSID(ssid) { document.getElementById("s").value = ssid; document.getElementById("wl").style.display = "none"; } function scan() { const request = new XMLHttpRequest(); const wl = document.getElementById("wl"); document.getElementById("wl").style.display = "block"; wl.innerHTML = "Scanning..."; request.onreadystatechange = function () { if (this.readyState == 4 && this.status == 200) { wl.innerHTML = "Scanning..."; const lines = this.responseText.split("\n"); wl.innerHTML = "<ul>" + lines .map((line) => { const [, status, ssid] = line.split(","); return `<li onclick="setSSID('${ssid}')"><span>${ status === "1" ? " \uD83D\uDD12" : " \u26A0" }</span> ${ssid}</li>`; }) .join("") + "</ul>"; } }; request.open("GET", "wifi/list", true); request.send(); } </script> <style> body { background-color: #202020; text-align: center; font-family: verdana; color: #00c0fb; } a, #wl { text-decoration: none; color: #00c0fb; font-size: 14px; } a { cursor: pointer; } .btn, input { box-sizing: border-box; width: 100%; line-height: 34px; appearance: none; background-color: #292929; border-radius: 4px; border: 1px dashed rgba(0, 192, 251, 0.2); color: rgba(0, 192, 251, 0.6); cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 300; margin: 0 0 8px 0; outline: 0; overflow: hidden; padding: 4px 8px; user-select: none; transition: all 0.2s linear; } .btn[active], .btn:hover { color: #00c0fb; border: 1px solid #00c0fb; box-shadow: inset 0 0 6px 4px rgba(0, 192, 251, 0.2), 0 0 6px 4px rgba(0, 192, 251, 0.2); } .btn.secondary { color: rgba(234, 182, 56, 0.7); border: 1px dashed rgba(234, 182, 56, 0.3); } .btn.secondary[active], .btn.secondary:hover { transform: scale(0.98); color: black; box-shadow: inset 0 0 6px 4px rgba(234, 182, 56, 0.2), 0 0 6px 8px rgba(234, 182, 56, 0.2); background-color: rgba(234, 182, 56, 0.7); } .container { text-align: left; display: inline-block; max-width: 320px; padding: 5px; } .mb-16 { margin-bottom: 16px; } ul { list-style-type: none; padding: 0; } li { border-radius: 8px; padding: 6px; cursor: pointer; padding-left: 8px; padding-right: 8px; border: 1px solid transparent; } li:hover { border: 1px solid #00c0fb; } </style> </head> <body> <div class="container"> <button onclick="scan()" class="btn" active>&#x21bb; Scan</button> <p id="wl"></p> <form method="post" action="/wifi/connect"> <input id="s" name="n" length="32" placeholder="SSID" /> <input id="p" name="p" length="64" type="password" placeholder="password" class="mb-16" /> <button class="btn secondary" type="submit" active>Connect</button> </form> <div> <a href="javascript:history.back()">Back</a> | <a href="/">Home</a> </div> </div> </body></html>)=====";
-// #endif
+#ifdef ESP32
+#include <esp_task_wdt.h>
+static const char wifi_htm[] PROGMEM = "NOT_USED"; // Dummy to satisfy unused variable warning if needed, or just standard headers.
+#endif
 
 extern const char *device_hostname_full;
 extern const char *device_hostname_partial;
+// Handled in header/source already
+
 
 PersWiFiManager::PersWiFiManager(AsyncWebServer &s, DNSServer &d)
 {
@@ -28,18 +29,24 @@ PersWiFiManager::PersWiFiManager(AsyncWebServer &s, DNSServer &d)
 bool PersWiFiManager::attemptConnection(const String &ssid, const String &pass)
 {
     //attempt to connect to wifi
-    // Configure WiFi settings to avoid ESP8266 Core 3.1.x bug
+    // Configure WiFi settings to avoid ESP8266 Core 3.1.x bug / flash wear.
+    // IMPORTANT: On ESP32, WiFi.persistent(false) changes the underlying storage to RAM
+    // (affects loading of saved credentials), so we only touch persistence on ESP8266.
+#ifdef ESP8266
     // Enable persistence only when explicitly saving new credentials
     if (ssid.length() > 0) {
         WiFi.persistent(true);  // Save new credentials to flash
     } else {
         WiFi.persistent(false); // Use saved credentials without re-writing
     }
+#endif
     WiFi.setAutoConnect(false);
     WiFi.setAutoReconnect(true);
     
     // Ensure WiFi hardware is fully awake and ready
+#ifdef ESP8266
     WiFi.forceSleepWake();
+#endif
     delay(100);
     
     // Properly disconnect before mode change
@@ -47,7 +54,11 @@ bool PersWiFiManager::attemptConnection(const String &ssid, const String &pass)
     delay(200); // Increased delay for stability
     WiFi.mode(WIFI_STA);
     delay(200); // Increased delay for stability
+#ifdef ESP8266
     WiFi.hostname(device_hostname_partial); // _full // before WiFi.begin();
+#else
+    WiFi.setHostname(device_hostname_partial);
+#endif
     delay(100); // Give time for hostname to be set
     
     if (ssid.length()) {
@@ -55,8 +66,10 @@ bool PersWiFiManager::attemptConnection(const String &ssid, const String &pass)
             WiFi.begin(ssid.c_str(), pass.c_str());
         else
             WiFi.begin(ssid.c_str());
-        // Disable persistence after saving
+        // Disable persistence after saving (ESP8266 only)
+#ifdef ESP8266
         WiFi.persistent(false);
+#endif
     } else {
         WiFi.begin();
     }
@@ -66,6 +79,10 @@ bool PersWiFiManager::attemptConnection(const String &ssid, const String &pass)
     while (!_connectNonBlock && _connectStartTime) {
         handleWiFi();
         delay(10);
+#ifdef ESP8266
+        // Keep wifi active
+        // delay(0); // already done by delay(10)
+#endif
     }
 
     return (WiFi.status() == WL_CONNECTED);
@@ -114,12 +131,20 @@ void PersWiFiManager::startApMode()
 {
     //start AP mode
     IPAddress apIP(192, 168, 4, 1);
+#ifdef ESP8266
     WiFi.disconnect(true); // true = erase STA credentials from this session
+#else
+    WiFi.disconnect(true, true); // true = erase STA credentials
+#endif
     delay(100);
     WiFi.mode(WIFI_AP);
     delay(100);
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+#ifdef ESP8266
     _apPass.length() ? WiFi.softAP(getApSsid().c_str(), _apPass.c_str(), 11) : WiFi.softAP(getApSsid().c_str());
+#else
+    _apPass.length() ? WiFi.softAP(getApSsid().c_str(), _apPass.c_str(), 11, 0, 4) : WiFi.softAP(getApSsid().c_str());
+#endif
 
     _dnsServer->stop();
     delay(50);
@@ -147,12 +172,14 @@ void PersWiFiManager::setupWiFiHandlers()
     // note: removed DNS server setup here
 
     _server->on("/wifi/list", HTTP_GET, [](AsyncWebServerRequest *request) {
-        //scan for wifi networks
+        //  -2: no scan started, -1: scan running, >=0: scan finished with N networks
         int n = WiFi.scanComplete();
         String s = "";
+
         if (n == -2) {
+            // Start scan asynchronously; web UI polls this endpoint.
             WiFi.scanNetworks(true);
-        } else if (n) {
+        } else if (n > 0) {
             //build array of indices
             int ix[n];
             for (int i = 0; i < n; i++)
@@ -170,15 +197,22 @@ void PersWiFiManager::setupWiFiHandlers()
                         ix[j] = -1;
 
             s.reserve(2050);
-            //build plain text string of wifi info
-            //format [signal%]:[encrypted 0 or 1]:SSID
             for (int i = 0; i < n && s.length() < 2000; i++) { //check s.length to limit memory usage
                 if (ix[i] != -1) {
+#ifdef ESP32
+                    s += String(i ? "\n" : "") + ((constrain(WiFi.RSSI(ix[i]), -100, -50) + 100) * 2) + "," + ((WiFi.encryptionType(ix[i]) == WIFI_AUTH_OPEN) ? 0 : 1) + "," + WiFi.SSID(ix[i]);
+#else
                     s += String(i ? "\n" : "") + ((constrain(WiFi.RSSI(ix[i]), -100, -50) + 100) * 2) + "," + ((WiFi.encryptionType(ix[i]) == ENC_TYPE_NONE) ? 0 : 1) + "," + WiFi.SSID(ix[i]);
+#endif
                 }
             }
             // don't cache found ssid's
             WiFi.scanDelete();
+        } else if (n < -1) {
+            // Unexpected error code; keep response empty to allow next poll
+            // (older code treated -2 as "start scan").
+        } else {
+            // n == -1: scan still running; keep response empty
         }
         //send string to client
         request->send(200, "text/plain", s);
@@ -221,4 +255,3 @@ void PersWiFiManager::onAp(WiFiChangeHandlerFunction fn)
 {
     _apHandler = fn;
 }
-#endif

@@ -5,12 +5,16 @@
    modified for inclusion in gbs-control
    see /3rdparty/PersWiFiManager/ for original code and license
 */
-#if defined(ESP8266)
 #ifndef PERSWIFIMANAGER_H
 #define PERSWIFIMANAGER_H
 
+#ifdef ESP32
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#else
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
+#endif
 #include <ESPAsyncWebServer.h>
 #include <DNSServer.h>
 
@@ -60,5 +64,4 @@ private:
 
 }; //class
 
-#endif
 #endif

@@ -52,7 +52,12 @@
     base_xtal = int_xtal = nxtal;
 
     // start I2C (wire) procedures
+    // On ESP32, re-calling Wire.begin() here can reset/reconfigure the HW I2C peripheral
+    // (pins/pullups/clock) and cause flaky or partial register programming in some setups.
+    // The main firmware configures I2C explicitly via startWire(); rely on that.
+#ifndef ESP32
     Wire.begin();
+#endif
 
     // shut off the spread spectrum by default, DWaite contibuted code
     uint8_t regval;
@@ -98,6 +103,13 @@ void Si5351mcu::setFreq(uint8_t clk, uint32_t freq) {
         outdivider = 900000000 / freq;
     #endif
 
+    // Some Si5351 modules/boards struggle to lock reliably when the PLL runs very near the top end.
+    // Around 108 MHz, the default algorithm picks outdivider=8 => fvco≈864 MHz.
+    // With the sync loop we often program 108MHz +/- a few 10s of kHz, so apply this in a range.
+    if (outdivider == 8 && freq >= 100000000UL) {
+        outdivider = 6; // fvco≈600..700 MHz (within 600..900 MHz typical range)
+    }
+
     // use additional Output divider ("R")
     while (outdivider > 900) {
         R = R * 2;
@@ -106,6 +118,12 @@ void Si5351mcu::setFreq(uint8_t clk, uint32_t freq) {
 
     // finds the even divider which delivers the intended Frequency
     if (outdivider % 2) outdivider--;
+
+    // Similar issue around 81MHz: default picks outdivider=10 (because 900/81=11 -> rounded down to 10)
+    // => fvco=810MHz. Prefer fvco≈648MHz (outdivider=8) to move away from the upper edge on marginal boards.
+    if (outdivider == 10 && freq >= 75000000UL && freq <= 90000000UL) {
+        outdivider = 8; // fvco≈600..720 MHz
+    }
 
     // Calculate the PLL-Frequency (given the even divider)
     fvco = outdivider * R * freq;
@@ -364,7 +382,8 @@ uint8_t Si5351mcu::i2cWriteBurst( const uint8_t start_register,
     // All of the bytes queued up in the above write() calls are buffered
     // up and will be sent to the slave in one "burst", on the call to
     // endTransmission().  This also sends the I2C STOP to the Slave.
-    return Wire.endTransmission();
+    uint8_t rc = Wire.endTransmission();
+    return rc;
     // returns non zero on error
 }
 

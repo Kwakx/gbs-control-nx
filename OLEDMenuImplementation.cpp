@@ -1,6 +1,10 @@
 #define OSD_TIMEOUT 8000
 
+#ifdef ESP32
+#include <WiFi.h>
+#else
 #include <ESP8266WiFi.h>
+#endif
 #include <LittleFS.h>
 #include <ESPAsyncWebServer.h>
 #include "OLEDMenuImplementation.h"
@@ -176,7 +180,7 @@ bool resetMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav,
         // not precise
         if (millis() - oledMenuFreezeStartTime >= oledMenuFreezeTimeoutInMS) {
             manager->unfreeze();
-            ESP.reset();
+            ESP.restart();
             return false;
         }
         return false;
@@ -202,9 +206,16 @@ bool resetMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLEDMenuNav,
     delay(50);
     switch (item->tag) {
         case MT_RESET_WIFI:
+            // Keep ESP8266 behavior (persistent toggle used to erase creds),
+            // but don't use WiFi.persistent() on ESP32 (it changes storage to RAM).
+#ifdef ESP8266
             WiFi.persistent(true);
             WiFi.disconnect();
             WiFi.persistent(false);
+#else
+            // ESP32: erase saved AP config (credentials) explicitly
+            WiFi.disconnect(true, true);
+#endif
             break;
         case MT_RESTORE_FACTORY:
             loadDefaultUserOptions();
@@ -443,7 +454,10 @@ bool firmwareUpdateMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLE
         // Only drop WS clients (closing/rewrapping the server causes rebind issues)
         webSocket.disconnect();
         // HTTP server must be stopped to free resources / avoid handling requests
+        // On ESP8266 only - ESP32 has sufficient resources and stopping/restarting causes bind errors
+#ifdef ESP8266
         server.end();
+#endif
         
         // Clear display to free frame buffer memory
         display->clear();
@@ -499,8 +513,10 @@ bool firmwareUpdateMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLE
                 extern runTimeOptions *rto;
                 
                 if (rto->webServerEnabled) {
+#ifdef ESP8266
                     Serial.println(F("[Menu] Restarting web services..."));
                     server.begin();
+#endif
                     rto->webServerStarted = true;
                 }
                 
@@ -529,8 +545,10 @@ bool firmwareUpdateMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLE
                 extern AsyncWebServer server;
                 extern runTimeOptions *rto;
                 if (rto->webServerEnabled) {
+#ifdef ESP8266
                     Serial.println(F("[Menu] Update canceled, restarting web services..."));
                     server.begin();
+#endif
                     rto->webServerStarted = true;
                 }
                 manager->unfreeze();
@@ -671,8 +689,10 @@ bool firmwareUpdateMenuHandler(OLEDMenuManager *manager, OLEDMenuItem *item, OLE
                 extern runTimeOptions *rto;
                 
                 if (rto->webServerEnabled) {
+#ifdef ESP8266
                     Serial.println(F("[Menu] Restarting web services after failed update..."));
                     server.begin();
+#endif
                     rto->webServerStarted = true;
                 }
                 

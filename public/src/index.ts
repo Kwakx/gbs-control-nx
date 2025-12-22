@@ -118,6 +118,7 @@ const GBSControl = {
   maxSlots: 72,
   queuedText: "",
   scanSSIDDone: false,
+  scanSSIDRetries: 0,
   serverIP: "",
   structs: null,
   timeOutWs: 0,
@@ -840,10 +841,11 @@ const doRestore = (file: ArrayBuffer) => {
   const funcs = files.map((fileName) => () => {
     const fileContents = fileBuffer.slice(pos, pos + headerObject[fileName]);
     const formData = new FormData();
+    const uploadName = fileName.startsWith("/") ? fileName.substr(1) : fileName;
     formData.append(
       "file",
       new Blob([fileContents], { type: "application/octet-stream" }),
-      fileName.substr(1)
+      uploadName
     );
 
     return fetch("/filesystem/upload", {
@@ -954,8 +956,16 @@ const wifiConnect = () => {
 const wifiScanSSID = () => {
   GBSControl.ui.wifiStaButton.setAttribute("disabled", "");
   GBSControl.ui.wifiListTable.innerHTML = "";
+  GBSControl.ui.wifiList.removeAttribute("hidden");
+  GBSControl.ui.wifiConnect.setAttribute("hidden", "");
+
+  const showWiFiStatusRow = (text: string) => {
+    GBSControl.ui.wifiListTable.innerHTML = `<tr><td colspan="3" style="text-align:center;opacity:.8">${text}</td></tr>`;
+  };
 
   if (!GBSControl.scanSSIDDone) {
+    GBSControl.scanSSIDRetries = 0;
+    showWiFiStatusRow("Scanning...");
     fetch(`/wifi/list?${+new Date()}`).then(() => {
       GBSControl.scanSSIDDone = true;
       setTimeout(wifiScanSSID, 3000);
@@ -966,6 +976,14 @@ const wifiScanSSID = () => {
   fetch(`/wifi/list?${+new Date()}`)
     .then((e) => e.text())
     .then((result) => {
+      // Some scans can take longer than 3s; keep polling a few times if empty.
+      if (!result.length && GBSControl.scanSSIDRetries < 10) {
+        GBSControl.scanSSIDRetries++;
+        showWiFiStatusRow("Scanning...");
+        setTimeout(wifiScanSSID, 1000);
+        return null;
+      }
+
       GBSControl.scanSSIDDone = false;
       return result.length
         ? result
@@ -977,6 +995,9 @@ const wifiScanSSID = () => {
         : [];
     })
     .then((ssids) => {
+      if (ssids === null) {
+        return null;
+      }
       return ssids.reduce((acc, ssid) => {
         return `${acc}<tr gbs-ssid="${ssid.ssid}">
         <td class="gbs-icon" style="opacity:${
@@ -988,12 +1009,17 @@ const wifiScanSSID = () => {
       }, "");
     })
     .then((html) => {
+      if (html === null) {
+        return;
+      }
       GBSControl.ui.wifiStaButton.removeAttribute("disabled");
 
       if (html.length) {
         GBSControl.ui.wifiListTable.innerHTML = html;
         GBSControl.ui.wifiList.removeAttribute("hidden");
         GBSControl.ui.wifiConnect.setAttribute("hidden", "");
+      } else {
+        GBSControl.ui.wifiListTable.innerHTML = `<tr><td colspan="3" style="text-align:center;opacity:.8">No networks found</td></tr>`;
       }
     });
 };

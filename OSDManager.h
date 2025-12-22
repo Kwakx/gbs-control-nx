@@ -112,7 +112,7 @@ public:
     {
         memset(&this->handlers, 0, sizeof(this->handlers));
     }
-    uint8 preset;
+    uint8_t preset;
     void registerIcon(OSDIcon icon, OSDHanlder handler)
     {
         this->handlers[(uint8_t)icon] = handler;
@@ -174,7 +174,7 @@ public:
 
         auto x_zoom = GBS::OSD_ZOOM_5X;
         auto y_zoom = GBS::OSD_ZOOM_4X;
-        switch (preset) {
+        switch (this->preset) {
             case 1: // 480p
                 x_zoom = GBS::OSD_ZOOM_7X;
                 y_zoom = GBS::OSD_ZOOM_2X;

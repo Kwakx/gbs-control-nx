@@ -18,7 +18,7 @@ OLEDMenuItem *OLEDMenuManager::allocItem()
     OLEDMenuItem *newItem = nullptr;
     for (int i = 0; i < OLED_MENU_MAX_ITEMS_NUM; ++i) {
         if (!this->allItems[i].used) {
-            memset(&this->allItems[i], 0, sizeof(OLEDMenuItem));
+            this->allItems[i] = OLEDMenuItem{};  // value initialization instead of memset
             newItem = &this->allItems[i];
             newItem->used = true;
             break;

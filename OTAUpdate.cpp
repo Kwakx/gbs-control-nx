@@ -1,9 +1,17 @@
 #include "OTAUpdate.h"
+#ifdef ESP32
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <Update.h>
+#include <mbedtls/sha256.h>
+#else
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <Updater.h>
 #include <bearssl/bearssl_hash.h>
+#endif
 #include <time.h>
 
 // Static member initialization
@@ -62,8 +70,10 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::checkForUpdate(String& latestVers
     // GitHub's certificates change frequently and cert bundles are memory-intensive
     client.setInsecure();
     
+#ifdef ESP8266
     // Set buffer sizes to save memory
     client.setBufferSizes(512, 512);
+#endif
 
     Serial.println(F("[OTA] Checking for updates..."));
     
@@ -181,7 +191,9 @@ String FirmwareUpdater::resolveRedirect(const String& url) {
         
         WiFiClientSecure client;
         client.setInsecure();
+#ifdef ESP8266
         client.setBufferSizes(256, 256); // Small buffers
+#endif
         client.setTimeout(10000);
         
         if (!client.connect(host.c_str(), port)) {
@@ -287,8 +299,10 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
     Serial.print(F("[OTA] Free heap before update: "));
     Serial.println(ESP.getFreeHeap());
 
+#ifdef ESP8266
     ESP.wdtDisable();
     Serial.println(F("[OTA] Watchdog disabled"));
+#endif
 
     WiFiClient client;
     client.setTimeout(60000);
@@ -297,9 +311,11 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
     Serial.print(host);
     Serial.println(F(":80 (HTTP)"));
     
-    if (!client.connect(host, 80)) {
+    if (!client.connect(host.c_str(), 80)) {
         Serial.println(F("[OTA] Connection failed"));
+#ifdef ESP8266
         ESP.wdtEnable(0);
+#endif
         return DOWNLOAD_FAILED;
     }
     
@@ -350,7 +366,9 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
         Serial.print(F("[OTA] HTTP Code: ")); Serial.println(httpCode);
         Serial.print(F("[OTA] Content Length: ")); Serial.println(contentLength);
         client.stop();
+#ifdef ESP8266
         ESP.wdtEnable(0);
+#endif
         return DOWNLOAD_FAILED;
     }
     
@@ -358,10 +376,18 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
     Serial.println(contentLength);
     
     if (!Update.begin(contentLength)) {
-        Serial.print(F("[OTA] Not enough space. Free: "));
+        Serial.print(F("[OTA] Not enough space. "));
+#ifdef ESP8266
+        Serial.print(F("Free: "));
         Serial.println(ESP.getFreeSketchSpace());
+#else
+        Serial.println(F("Details:"));
+        Update.printError(Serial);
+#endif
         client.stop();
+#ifdef ESP8266
         ESP.wdtEnable(0);
+#endif
         return INSUFFICIENT_SPACE;
     }
     
@@ -370,8 +396,14 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
     Serial.println(ESP.getFreeHeap());
     
     // Initialize SHA256 hash calculation using BearSSL (always required)
+#ifdef ESP32
+    mbedtls_sha256_context sha256Ctx;
+    mbedtls_sha256_init(&sha256Ctx);
+    mbedtls_sha256_starts(&sha256Ctx, 0);
+#else
     br_sha256_context sha256Ctx;
     br_sha256_init(&sha256Ctx);
+#endif
     Serial.println(F("[OTA] SHA256 verification enabled"));
     
     uint8_t buff[512];
@@ -394,7 +426,11 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
                 lastData = millis();
                 
                 // Update SHA256 hash calculation
+#ifdef ESP32
+                mbedtls_sha256_update(&sha256Ctx, buff, readBytes);
+#else
                 br_sha256_update(&sha256Ctx, buff, readBytes);
+#endif
                 
                 size_t bytesWritten = Update.write(buff, readBytes);
                 if (bytesWritten != (size_t)readBytes) {
@@ -427,7 +463,9 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
                 }
                 
                 if (written % (contentLength / 100) == 0) {
+#ifdef ESP8266
                     ESP.wdtFeed();
+#endif
                 }
                 
                 yield();
@@ -447,7 +485,9 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
         Serial.println(F("[OTA] Download incomplete"));
         client.stop();
         Update.end(false); // Abort update
+#ifdef ESP8266
         ESP.wdtEnable(0);
+#endif
         return DOWNLOAD_FAILED;
     }
     
@@ -455,7 +495,12 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
     
     // Verify SHA256 hash (always required)
     uint8_t calculatedHash[32];
+#ifdef ESP32
+    mbedtls_sha256_finish(&sha256Ctx, calculatedHash);
+    mbedtls_sha256_free(&sha256Ctx);
+#else
     br_sha256_out(&sha256Ctx, calculatedHash);
+#endif
     
     // Convert calculated hash to hex string
     String calculatedHashHex = "";
@@ -475,7 +520,9 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
     if (calculatedHashHex != expectedSha256) {
         Serial.println(F("[OTA] SHA256 checksum mismatch! Aborting update."));
         Update.end(false); // Abort update
+#ifdef ESP8266
         ESP.wdtEnable(0);
+#endif
         return CHECKSUM_FAILED;
     }
     
@@ -484,13 +531,17 @@ FirmwareUpdater::UpdateStatus FirmwareUpdater::performUpdate(void (*progressCall
     if (!Update.end()) {
         Serial.println(F("[OTA] Update end failed"));
         Update.printError(Serial);
+#ifdef ESP8266
         ESP.wdtEnable(0);
+#endif
         return FLASH_FAILED;
     }
     
     if (!Update.isFinished()) {
         Serial.println(F("[OTA] Update not finished"));
+#ifdef ESP8266
         ESP.wdtEnable(0);
+#endif
         return FLASH_FAILED;
     }
     
@@ -534,9 +585,14 @@ bool FirmwareUpdater::parseReleaseInfo(const String& json, String& version, Stri
     String assetsSection = json.substring(assetArrayStart, assetArrayEnd);
 
     // Look for firmware.bin asset
-    int nameIndex = assetsSection.indexOf("\"name\":\"firmware.bin\"");
+#ifdef ESP32
+    String firmwareName = "firmware_esp32.bin";
+#else
+    String firmwareName = "firmware.bin";
+#endif
+    int nameIndex = assetsSection.indexOf("\"name\":\"" + firmwareName + "\"");
     if (nameIndex == -1) {
-        Serial.println(F("[OTA] firmware.bin not found in assets"));
+        Serial.println(F("[OTA] firmware not found in assets"));
         return false;
     }
 

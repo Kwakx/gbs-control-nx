@@ -32,7 +32,7 @@ extern "C" {
 #ifdef CORE_HAS_LIBB64
 #include <libb64/cencode.h>
 #else
-#include "libb64/cencode_inc.h"
+#include "libb64/cencode.h"
 #endif
 }
 

@@ -28,17 +28,28 @@
 
 // Firmware version for OTA updates - must match the current GitHub release tag
 // This version is compared with the latest release from GitHub API to determine if update is available
-const char* FIRMWARE_VERSION = "v1.2.3";
+const char* FIRMWARE_VERSION = "v1.3.0";
 
 
 
 static inline void writeBytes(uint8_t slaveRegister, uint8_t *values, uint8_t numValues);
 const uint8_t *loadPresetFromLittleFS(byte forVideoMode);
 
-SSD1306Wire display(0x3c, D2, D1); //inits I2C address & pins for OLED
+#ifdef ESP32
+const int SDA_PIN = 21;
+const int SCL_PIN = 22;
+const int pin_clk = 33;
+const int pin_data = 32;
+const int pin_switch = 14;
+#else
+const int SDA_PIN = D2;
+const int SCL_PIN = D1;
 const int pin_clk = 14;            //D5 = GPIO14 (input of one direction for encoder)
 const int pin_data = 13;           //D7 = GPIO13	(input of one direction for encoder)
 const int pin_switch = 0;          //D3 = GPIO0 pulled HIGH, else boot fail (middle push button for encoder)
+#endif
+
+SSD1306Wire display(0x3c, SDA_PIN, SCL_PIN); //inits I2C address & pins for OLED
 
 
 #if USE_NEW_OLED_MENU
@@ -66,18 +77,30 @@ volatile int oled_main_pointer = 0; // volatile vars change done with ISR
 volatile int oled_pointer_count = 0;
 volatile int oled_sub_pointer = 0;
 #endif
-#include <ESP8266WiFi.h>
+#ifdef ESP32
+  #include <WiFi.h>
+  #include <AsyncTCP.h>
+  #include <ESPmDNS.h>
+  #include "FS.h"
+  #include <LittleFS.h>
+  #include <DNSServer.h>
+  #include <WiFiUdp.h>
+  #include <esp_wifi.h>
+#else
+  #include <ESP8266WiFi.h>
+  #include <ESPAsyncTCP.h>
+  #include <ESP8266mDNS.h>
+  #include "FS.h"
+  #include <LittleFS.h>
+  #include <DNSServer.h>
+  #include <WiFiUdp.h>
+#endif
 // ESPAsyncTCP and ESPAsyncWebServer libraries (esp32async fork, compatible with me-no-dev)
 // Managed via PlatformIO: esp32async/ESPAsyncTCP@^2.0.0 and esp32async/ESPAsyncWebServer@^3.9.2
 // https://github.com/esp32async/ESPAsyncTCP
 // https://github.com/esp32async/ESPAsyncWebServer
-#include <ESPAsyncTCP.h>
+//#include <ESPAsyncTCP.h> // Handled above
 #include <ESPAsyncWebServer.h>
-#include "FS.h"
-#include <LittleFS.h>
-#include <DNSServer.h>
-#include <WiFiUdp.h>
-#include <ESP8266mDNS.h> // mDNS library for finding gbscontrol.local on the local network
 #include <ArduinoOTA.h>
 
 // PersWiFiManager library by Ryan Downing
@@ -146,19 +169,92 @@ WebSocketsServer webSocket(81);
 //AsyncWebSocket webSocket("/ws");
 PersWiFiManager persWM(server, dnsServer);
 
+#ifdef ESP32
+#ifdef DEBUG_IN_PIN
+#undef DEBUG_IN_PIN
+#endif
+#define DEBUG_IN_PIN 27
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 2  // D2 pin on ESP32 (GPIO 2)
+#endif
+#else
+#ifdef DEBUG_IN_PIN
+#undef DEBUG_IN_PIN
+#endif
 #define DEBUG_IN_PIN D6 // marked "D12/MISO/D6" (Wemos D1) or D6 (Lolin NodeMCU)
+#endif
 // SCL = D1 (Lolin), D15 (Wemos D1) // ESP8266 Arduino default map: SCL
 // SDA = D2 (Lolin), D14 (Wemos D1) // ESP8266 Arduino default map: SDA
+#ifdef ESP8266
+#ifdef LEDON
+#undef LEDON
+#endif
+#ifdef LEDOFF
+#undef LEDOFF
+#endif
 #define LEDON                     \
     pinMode(LED_BUILTIN, OUTPUT); \
     digitalWrite(LED_BUILTIN, LOW)
 #define LEDOFF                       \
     digitalWrite(LED_BUILTIN, HIGH); \
     pinMode(LED_BUILTIN, INPUT)
+#elif defined(ESP32)
+// ESP32: LED on D2 (GPIO 2) is active HIGH (inverted logic compared to ESP8266)
+#ifdef LED_BUILTIN
+#ifdef LEDON
+#undef LEDON
+#endif
+#ifdef LEDOFF
+#undef LEDOFF
+#endif
+#define LEDON                     \
+    pinMode(LED_BUILTIN, OUTPUT); \
+    digitalWrite(LED_BUILTIN, HIGH)
+#define LEDOFF                       \
+    pinMode(LED_BUILTIN, OUTPUT); \
+    digitalWrite(LED_BUILTIN, LOW)
+#else
+#ifdef LEDON
+#undef LEDON
+#endif
+#ifdef LEDOFF
+#undef LEDOFF
+#endif
+#define LEDON
+#define LEDOFF
+#endif
+#else
+// Other platforms (not ESP8266, not ESP32)
+#ifdef LED_BUILTIN
+#ifdef LEDON
+#undef LEDON
+#endif
+#ifdef LEDOFF
+#undef LEDOFF
+#endif
+#define LEDON                     \
+    pinMode(LED_BUILTIN, OUTPUT); \
+    digitalWrite(LED_BUILTIN, LOW)
+#define LEDOFF                       \
+    digitalWrite(LED_BUILTIN, HIGH); \
+    pinMode(LED_BUILTIN, INPUT)
+#else
+#ifdef LEDON
+#undef LEDON
+#endif
+#ifdef LEDOFF
+#undef LEDOFF
+#endif
+#define LEDON
+#define LEDOFF
+#endif
+#endif
 
+#ifdef ESP8266
 // fast ESP8266 digitalRead (21 cycles vs 77), *should* work with all possible input pins
 // but only "D7" and "D6" have been tested so far
 #define digitalRead(x) ((GPIO_REG_READ(GPIO_IN_ADDRESS) >> x) & 1)
+#endif
 
 // feed the current measurement, get back the moving average
 uint8_t getMovingAverage(uint8_t item)
@@ -215,7 +311,6 @@ String userCommandBuffer = "";  // Buffering for Web Server commands
 static uint8_t lastSegment = 0xFF; // GBS segment for direct access
 //uint8_t globalDelay; // used for dev / debug
 
-#if defined(ESP8266)
 // Buffered serial mirror class for websocket logs
 // 
 // Why buffering?
@@ -288,10 +383,10 @@ public:
 };
 
 SerialMirror SerialM;
-#else
-#define SerialM Serial
-#endif
 
+// Best observed Si5351 XTAL load capacitance setting from detection/init.
+// Used later during clock resets to keep behavior consistent.
+static uint8_t g_si5351_best_xtal_cl = 0xD2; // 10pF default
 #include "framesync.h"
 
 //
@@ -313,6 +408,44 @@ void externalClockGenResetClock()
         return;
     }
     fsDebugPrintf("externalClockGenResetClock()\n");
+
+    auto readSi5351Reg = [](uint8_t reg) -> int {
+        Wire.beginTransmission(SIADDR);
+        Wire.write(reg);
+        if (Wire.endTransmission() != 0) return -1;
+        size_t n = Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+        if (n != 1) return -2;
+        return Wire.read();
+    };
+    auto writeSi5351Reg = [](uint8_t reg, uint8_t val) -> bool {
+        Wire.beginTransmission(SIADDR);
+        Wire.write(reg);
+        Wire.write(val);
+        return Wire.endTransmission() == 0;
+    };
+    auto waitSi5351Lock = [&](const char *where) -> bool {
+        uint32_t t0 = millis();
+        uint32_t lastLog = 0;
+        int st = -999;
+        // Wait longer on ESP32 after reprogramming PLL/MS for 108MHz.
+        while (millis() - t0 < 250) {
+            st = readSi5351Reg(0x00);     // device status
+
+            uint32_t elapsed = millis() - t0;
+            if (elapsed == 0 || elapsed - lastLog >= 25) {
+                lastLog = elapsed;
+
+            }
+
+            // We only use CLK0 (PLLA) in this firmware; some modules report LOLB even if PLLB is unused.
+            // Treat LOLA as the lock indicator; LOS may remain asserted on some modules.
+            if (st >= 0 && (st & 0x20) == 0 && (st & 0x80) == 0) {
+                return true;
+            }
+            delay(1);
+        }
+        return false;
+    };
 
     uint8_t activeDisplayClock = GBS::PLL648_CONTROL_01::read();
 
@@ -339,8 +472,11 @@ void externalClockGenResetClock()
         SerialM.println(activeDisplayClock, HEX);
     }
 
+    // NOTE: Historically there was a "pre-step" workaround for 108MHz/40.5MHz.
+    // On ESP32 this can interact badly with Si5351 lock; we'll skip the pre-step
+    // and rely on direct programming
+#ifndef ESP32
     // problem: around 108MHz the library seems to double the clock
-    // maybe there are regs to check for this and resetPLL
     if (rto->freqExtClockGen == 108000000) {
         Si.setFreq(0, 87000000);
         delay(1); // quick fix
@@ -350,13 +486,42 @@ void externalClockGenResetClock()
         Si.setFreq(0, 48500000);
         delay(1); // quick fix
     }
+#endif
+    // Re-apply best XTAL_CL discovered during init before programming new freq.
+    writeSi5351Reg(183, g_si5351_best_xtal_cl);
+    (void)readSi5351Reg(183);
+
+    // Keep CKIN disabled while (re)programming the Si5351 to avoid loading the output
+    // during the critical lock window. We'll only enable CKIN after we confirm lock.
+    GBS::PAD_CKIN_ENZ::write(1); // 1 = clock input disable (pin40)
 
     Si.setFreq(0, rto->freqExtClockGen);
-    GBS::PAD_CKIN_ENZ::write(0); // 0 = clock input enable (pin40)
+    // Mirror init behavior: enable output and clear interrupt flags before waiting for lock.
+    Si.enable(0);
+    writeSi5351Reg(0x01, 0xFF); // clear sticky interrupt status
+    (void)readSi5351Reg(0x00);
+    (void)readSi5351Reg(0x01);
     FrameSync::clearFrequency();
 
     SerialM.print(F("clock gen reset: "));
     SerialM.println(rto->freqExtClockGen);
+
+    // If Si5351 isn't locked yet, it will continue to try and lock in the background.
+    // We keep CKIN enabled (0) because the user wants to stay on the external clock regardless.
+    bool locked = waitSi5351Lock("externalClockGenResetClock");
+    if (!locked) {
+        // Try a PLL reset once, then wait again.
+        Si5351mcu::reset();
+        locked = waitSi5351Lock("externalClockGenResetClock_after_reset");
+    }
+    
+    GBS::PAD_CKIN_ENZ::write(0); // 0 = clock input enable (pin40)
+    
+    if (locked) {
+        (void)readSi5351Reg(0x00);
+    }
+    (void)writeSi5351Reg(0x01, 0xFF);
+    (void)readSi5351Reg(0x00);
 }
 
 void externalClockGenSyncInOutRate()
@@ -377,6 +542,7 @@ void externalClockGenSyncInOutRate()
     }
 
     float sfr = getSourceFieldRate(0);
+
     if (sfr < 47.0f || sfr > 86.0f) {
         SerialM.print(F("sync skipped sfr wrong: "));
         SerialM.println(sfr);
@@ -384,16 +550,76 @@ void externalClockGenSyncInOutRate()
     }
 
     float ofr = getOutputFrameRate();
+
     if (ofr < 47.0f || ofr > 86.0f) {
         SerialM.print(F("sync skipped ofr wrong: "));
         SerialM.println(ofr);
         return;
     }
 
+    // ESP32 can exhibit timing jitter in the measurement path; instead of skipping
+    // (which stalls convergence), clamp the correction per step to avoid large jumps.
+    float ratio = (ofr > 0.0f) ? (sfr / ofr) : 1.0f;
+    constexpr float MAX_RATIO_STEP = 0.0006f; // match FrameSyncManager::runFrequency clamp
+    if (ratio > 1.0f + MAX_RATIO_STEP) ratio = 1.0f + MAX_RATIO_STEP;
+    if (ratio < 1.0f - MAX_RATIO_STEP) ratio = 1.0f - MAX_RATIO_STEP;
+
     uint32_t old = rto->freqExtClockGen;
     FrameSync::initFrequency(ofr, old);
 
-    setExternalClockGenFrequencySmooth((sfr / ofr) * rto->freqExtClockGen);
+    uint32_t newClockFreq = ratio * rto->freqExtClockGen;
+    // Program Si5351 safely: disconnect GBS clock input during programming/lock window.
+    // Avoid using setExternalClockGenFrequencySmooth() here because it iterates many Si.setFreq()
+    // calls without any CKIN gating, which can glitch the active video clock.
+
+    // keep CKIN disabled while reprogramming
+    GBS::PAD_CKIN_ENZ::write(1);
+    // re-apply the best XTAL_CL we discovered earlier for consistency
+    Wire.beginTransmission(SIADDR);
+    Wire.write(183);
+    Wire.write(g_si5351_best_xtal_cl);
+    Wire.endTransmission();
+    // program the new frequency in one shot (small ratio steps already clamp the delta)
+    Si.setFreq(0, newClockFreq);
+    Si.enable(0);
+    Wire.beginTransmission(SIADDR);
+    Wire.write(0x01);
+    Wire.write(0xFF);
+    Wire.endTransmission();
+    // Wait until LOLA/LOLB clear (ignore LOS), then re-enable CKIN.
+    // Reuse the same lock criteria as externalClockGenResetClock.
+    uint32_t t0 = millis();
+    int st = -999;
+    while (millis() - t0 < 80) {
+        Wire.beginTransmission(SIADDR);
+        Wire.write(0x00);
+        if (Wire.endTransmission() == 0) {
+            int n = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+            if (n == 1) st = Wire.read();
+        }
+        if (st >= 0 && (st & 0x20) == 0 && (st & 0x80) == 0) break;
+        delay(1);
+    }
+    bool ok = (st >= 0 && (st & 0x20) == 0 && (st & 0x80) == 0);
+    if (!ok) {
+        static uint32_t lastSyncFailLog = 0;
+        if (millis() - lastSyncFailLog > 1000) {
+            SerialM.printf("Si5351 sync-tune lock failed (st:0x%02X). Rolling back to %u Hz.\n", st, old);
+            lastSyncFailLog = millis();
+        }
+        Si.setFreq(0, old);
+        Si.enable(0);
+        Wire.beginTransmission(SIADDR);
+        Wire.write(0x01);
+        Wire.write(0xFF);
+        Wire.endTransmission();
+        rto->freqExtClockGen = old;
+    } else {
+        rto->freqExtClockGen = newClockFreq;
+    }
+    // Reconnect GBS to the (restored/new) external clock.
+    GBS::PAD_CKIN_ENZ::write(0);
+
 
     int32_t diff = rto->freqExtClockGen - old;
 
@@ -407,16 +633,43 @@ void externalClockGenSyncInOutRate()
     SerialM.print(diff >= 0 ? "+" : "");
     SerialM.print(diff);
     SerialM.println(F(")"));
-    delay(1);
+    // (no extra delay here; video clock is already back on after CKIN enable)
 }
 
 void externalClockGenDetectAndInitialize()
 {
-    const uint8_t xtal_cl = 0xD2; // 10pF, other choices are 8pF (0x92) and 6pF (0x52) NOTE: Per AN619, the low bytes should be written 0b010010
+
+    // XTAL load capacitance. Some Si5351 boards are sensitive and may fail to oscillate (LOS=1)
+    // depending on this setting and supply/noise. We'll probe a few options at runtime.
+    // 10pF (0xD2), 8pF (0x92), 6pF (0x52)
+    const uint8_t xtal_cl_default = 0xD2; // NOTE: Per AN619, the low bytes should be written 0b010010
 
     // MHz: 27, 32.4, 40.5, 54, 64.8, 81, 108, 129.6, 162
     rto->freqExtClockGen = 81000000;
     rto->extClockGenDetected = 0;
+
+    // Snapshot Si5351 status before detection/init.
+    int st_pre = -999, st_pre2 = -999;
+    int et0 = -999; // endTransmission return
+    int n0 = -999;  // bytes read
+    Wire.beginTransmission(SIADDR);
+    Wire.write(0x00);
+    et0 = Wire.endTransmission();
+    if (et0 == 0) {
+        n0 = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+        if (n0 == 1) st_pre = Wire.read();
+    }
+    // read twice to detect flaky bus
+    Wire.beginTransmission(SIADDR);
+    Wire.write(0x00);
+    if (Wire.endTransmission() == 0) {
+        int n1 = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+        if (n1 == 1) st_pre2 = Wire.read();
+    }
+    (void)st_pre;
+    (void)st_pre2;
+    (void)et0;
+    (void)n0;
 
     if (uopt->disableExternalClockGenerator) {
         SerialM.println(F("ExternalClockGenerator disabled, skipping detection"));
@@ -448,14 +701,145 @@ void externalClockGenDetectAndInitialize()
         return;
     }
 
-    Si.init(25000000L); // many Si5351 boards come with 25MHz crystal; 27000000L for one with 27MHz
+    auto readSt = []() -> int {
+        Wire.beginTransmission(SIADDR);
+        Wire.write(0x00);
+        if (Wire.endTransmission() != 0) return -1;
+        int n = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+        if (n != 1) return -2;
+        return Wire.read();
+    };
+    auto clearInt = []() -> bool {
+        Wire.beginTransmission(SIADDR);
+        Wire.write(0x01); // interrupt status (sticky)
+        Wire.write(0xFF); // clear all
+        return Wire.endTransmission() == 0;
+    };
+    auto isLockedSt = [](int st) -> bool {
+        // We only use CLK0 (PLLA) in this firmware; ignore LOLB (PLLB) for lock.
+        // st bit5=LOLA, bit6=LOLB, bit4=LOS, bit7=SYS_INIT
+        return (st >= 0) && ((st & 0x20) == 0) && ((st & 0x80) == 0);
+    };
+    auto waitLock = [&](uint32_t timeoutMs) -> int {
+        uint32_t t0 = millis();
+        int st = -999;
+        while (millis() - t0 < timeoutMs) {
+            st = readSt();
+            if (isLockedSt(st)) return st;
+            delay(1);
+        }
+        return st;
+    };
+    auto readRegs = [](uint8_t startReg, uint8_t count, uint8_t *out) -> bool {
+        Wire.beginTransmission(SIADDR);
+        Wire.write(startReg);
+        if (Wire.endTransmission() != 0) return false;
+        int n = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)count, false);
+        if (n != (int)count) return false;
+        for (uint8_t i = 0; i < count; i++) out[i] = (uint8_t)Wire.read();
+        return true;
+    };
+
+    // IMPORTANT (runtime-proven): Using the wrong XTAL here scales the output frequency.
+    // Default to 25MHz, as most Si5351 boards use it.
+    uint32_t xtal = 25000000UL;
+
+    // Probe XTAL_CL settings to see if we can clear LOS/LOLA on ESP32.
+    uint8_t xtal_cls[3] = {xtal_cl_default, 0x92, 0x52};
+    int st_after = -999;
+    // Keep the best (lowest) status we observed so later clock resets reuse it.
+    uint8_t best_xtal_cl = xtal_cl_default;
+    int best_score = 0x7fffffff;
+    auto scoreSt = [](int st) -> int {
+        // Lower is better. We care mainly about lock-related flags.
+        // bit4=LOS, bit5=LOLA, bit6=LOLB, bit7=SYS_INIT
+        if (st < 0) return 1000;
+        int score = 0;
+        if (st & 0x80) score += 100; // SYS_INIT
+        if (st & 0x10) score += 10;  // LOS
+        if (st & 0x20) score += 5;   // LOLA
+        if (st & 0x40) score += 5;   // LOLB
+        return score;
+    };
+    for (uint8_t t = 0; t < 3; t++) {
+        uint8_t xtal_cl = xtal_cls[t];
+        Si.init(xtal);
+        Wire.beginTransmission(SIADDR);
+        Wire.write(183); // XTAL_CL
+        Wire.write(xtal_cl);
+        Wire.endTransmission();
+        Si.setPower(0, SIOUT_6mA);
+        Si.setFreq(0, rto->freqExtClockGen);
+        Si.enable(0);
+        bool clrOk = clearInt();
+        delay(2);
+        int st0 = readSt();
+        int stw = waitLock(200);
+        st_after = readSt();
+
+        // Read back key PLL/MS registers to detect partial programming.
+        uint8_t pllA[8] = {0}, ms0[8] = {0};
+        bool pllOk = readRegs(26, 8, pllA); // PLLA params
+        bool msOk = readRegs(42, 8, ms0);   // MS0 params (regs 42..49)
+        // Also read OE/CLK0 control for sanity.
+        int oe = -999, clk0 = -999;
+        Wire.beginTransmission(SIADDR);
+        Wire.write(0x03);
+        if (Wire.endTransmission() == 0) {
+            int n = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+            if (n == 1) oe = Wire.read();
+        }
+        Wire.beginTransmission(SIADDR);
+        Wire.write(0x10);
+        if (Wire.endTransmission() == 0) {
+            int n = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+            if (n == 1) clk0 = Wire.read();
+        }
+
+        Si.disable(0);
+        (void)clrOk;
+        (void)st0;
+        (void)stw;
+        (void)st_after;
+        (void)pllOk;
+        (void)msOk;
+        (void)pllA;
+        (void)ms0;
+        (void)oe;
+        (void)clk0;
+
+        int sc = scoreSt(st_after);
+        if (sc < best_score) {
+            best_score = sc;
+            best_xtal_cl = xtal_cl;
+        }
+        if (isLockedSt(st_after)) {
+            break;
+        }
+    }
+    // Persist best observed XTAL_CL for later use in externalClockGenResetClock().
+    g_si5351_best_xtal_cl = best_xtal_cl;
+    (void)best_score;
+
+    int st_post = -999, st_post2 = -999;
+    int etp0 = -999, np0 = -999;
     Wire.beginTransmission(SIADDR);
-    Wire.write(183);    // XTAL_CL
-    Wire.write(xtal_cl);
-    Wire.endTransmission();
-    Si.setPower(0, SIOUT_6mA);
-    Si.setFreq(0, rto->freqExtClockGen);
-    Si.disable(0);
+    Wire.write(0x00);
+    etp0 = Wire.endTransmission();
+    if (etp0 == 0) {
+        np0 = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+        if (np0 == 1) st_post = Wire.read();
+    }
+    Wire.beginTransmission(SIADDR);
+    Wire.write(0x00);
+    if (Wire.endTransmission() == 0) {
+        int np1 = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+        if (np1 == 1) st_post2 = Wire.read();
+    }
+    (void)st_post;
+    (void)st_post2;
+    (void)etp0;
+    (void)np0;
 }
 
 static inline void writeOneByte(uint8_t slaveRegister, uint8_t value)
@@ -3090,7 +3474,13 @@ boolean applyBestHTotal(uint16_t bestHTotal)
 
 float getSourceFieldRate(boolean useSPBus)
 {
-    double esp8266_clock_freq = ESP.getCpuFreqMHz() * 1000000;
+    uint32_t cpuFreqMHz_raw = ESP.getCpuFreqMHz();
+    double tickRateHz =
+#ifdef ESP32
+        1000000.0; // MeasurePeriod uses micros() on ESP32
+#else
+        cpuFreqMHz_raw * 1000000.0;
+#endif
     uint8_t testBusSelBackup = GBS::TEST_BUS_SEL::read();
     uint8_t spBusSelBackup = GBS::TEST_BUS_SP_SEL::read();
     uint8_t ifBusSelBackup = GBS::IF_TEST_SEL::read();
@@ -3128,12 +3518,12 @@ float getSourceFieldRate(boolean useSPBus)
     }
 
     if (fieldTimeTicks > 0) {
-        retVal = esp8266_clock_freq / (double)fieldTimeTicks;
+        retVal = tickRateHz / (double)fieldTimeTicks;
         if (retVal < 47.0f || retVal > 86.0f) {
             // try again
             fieldTimeTicks = FrameSync::getPulseTicks();
             if (fieldTimeTicks > 0) {
-                retVal = esp8266_clock_freq / (double)fieldTimeTicks;
+                retVal = tickRateHz / (double)fieldTimeTicks;
             }
         }
     }
@@ -3150,7 +3540,13 @@ float getSourceFieldRate(boolean useSPBus)
 
 float getOutputFrameRate()
 {
-    double esp8266_clock_freq = ESP.getCpuFreqMHz() * 1000000;
+    uint32_t cpuFreqMHz_raw = ESP.getCpuFreqMHz();
+    double tickRateHz =
+#ifdef ESP32
+        1000000.0; // MeasurePeriod uses micros() on ESP32
+#else
+        cpuFreqMHz_raw * 1000000.0;
+#endif
     uint8_t testBusSelBackup = GBS::TEST_BUS_SEL::read();
     uint8_t debugPinBackup = GBS::PAD_BOUT_EN::read();
 
@@ -3162,21 +3558,47 @@ float getOutputFrameRate()
 
     float retVal = 0;
 
-    uint32_t fieldTimeTicks = FrameSync::getPulseTicks();
-    if (fieldTimeTicks == 0) {
-        // try again
-        fieldTimeTicks = FrameSync::getPulseTicks();
-    }
+    // ESP32 can show significant ISR latency jitter with WiFi/RTOS, which
+    // makes a single pulse measurement unreliable. Take multiple samples and
+    // reject outliers (similar to FrameSyncManager::runFrequency()).
+    uint32_t ticks1 = 0, ticks2 = 0, ticks3 = 0;
+    float f1 = 0, f2 = 0, f3 = 0;
+    auto calcHz = [&](uint32_t ticks) -> float {
+        if (ticks == 0) return 0.0f;
+        return (float)(tickRateHz / (double)ticks);
+    };
 
-    if (fieldTimeTicks > 0) {
-        retVal = esp8266_clock_freq / (double)fieldTimeTicks;
-        if (retVal < 47.0f || retVal > 86.0f) {
-            // try again
-            fieldTimeTicks = FrameSync::getPulseTicks();
-            if (fieldTimeTicks > 0) {
-                retVal = esp8266_clock_freq / (double)fieldTimeTicks;
-            }
-        }
+    ticks1 = FrameSync::getPulseTicks();
+    f1 = calcHz(ticks1);
+    ticks2 = FrameSync::getPulseTicks();
+    f2 = calcHz(ticks2);
+
+    // If first two samples disagree too much, take a third and pick the median.
+    float diff12 = fabsf(f2 - f1);
+    float rel12 = (f1 > 0 && f2 > 0) ? (diff12 / fminf(f1, f2)) : 999.0f;
+    if (ticks1 == 0 || ticks2 == 0 || f1 < 47.0f || f1 > 86.0f || f2 < 47.0f || f2 > 86.0f || diff12 > 0.5f || rel12 > 0.00833f) {
+        ticks3 = FrameSync::getPulseTicks();
+        f3 = calcHz(ticks3);
+
+        // Choose median of valid samples (ignoring zeros/out-of-range as worst).
+        auto score = [&](float f) -> float {
+            if (f < 47.0f || f > 86.0f) return 9999.0f;
+            return fabsf(f - 50.0f); // prefer around 50/60Hz region
+        };
+        // simplistic: pick the sample closest to the other(s)
+        float d13 = fabsf(f3 - f1);
+        float d23 = fabsf(f3 - f2);
+        if (score(f1) <= score(f2) && score(f1) <= score(f3)) retVal = f1;
+        else if (score(f2) <= score(f1) && score(f2) <= score(f3)) retVal = f2;
+        else retVal = f3;
+
+        // If we have two close samples among the three, average them for stability.
+        if (f1 >= 47.0f && f1 <= 86.0f && f2 >= 47.0f && f2 <= 86.0f && diff12 <= 0.5f && rel12 <= 0.00833f) retVal = 0.5f * (f1 + f2);
+        else if (f1 >= 47.0f && f1 <= 86.0f && f3 >= 47.0f && f3 <= 86.0f && d13 <= 0.5f) retVal = 0.5f * (f1 + f3);
+        else if (f2 >= 47.0f && f2 <= 86.0f && f3 >= 47.0f && f3 <= 86.0f && d23 <= 0.5f) retVal = 0.5f * (f2 + f3);
+    } else {
+        // Two consistent samples: average them.
+        retVal = 0.5f * (f1 + f2);
     }
 
     GBS::TEST_BUS_SEL::write(testBusSelBackup);
@@ -3188,7 +3610,11 @@ float getOutputFrameRate()
 // used for RGBHV to determine the ADPLL speed "level" / can jitter with SOG Sync
 uint32_t getPllRate()
 {
-    uint32_t esp8266_clock_freq = ESP.getCpuFreqMHz() * 1000000;
+#ifdef ESP32
+    uint32_t tickRateHz = 1000000;
+#else
+    uint32_t tickRateHz = ESP.getCpuFreqMHz() * 1000000;
+#endif
     uint8_t testBusSelBackup = GBS::TEST_BUS_SEL::read();
     uint8_t spBusSelBackup = GBS::TEST_BUS_SP_SEL::read();
     uint8_t debugPinBackup = GBS::PAD_BOUT_EN::read();
@@ -3217,7 +3643,7 @@ uint32_t getPllRate()
 
     uint32_t retVal = 0;
     if (ticks > 0) {
-        retVal = esp8266_clock_freq / ticks;
+        retVal = tickRateHz / ticks;
     }
 
     return retVal;
@@ -4259,7 +4685,7 @@ void applyPresets(uint8_t result)
         } else if (uopt->presetPreference == 3) {
             writeProgramArrayNew(ntsc_1280x720, false);
         }
-#if defined(ESP8266)
+#if defined(ESP8266) || defined(ESP32)
         else if (uopt->presetPreference == OutputCustomized) {
             const uint8_t *preset = loadPresetFromLittleFS(result);
             writeProgramArrayNew(preset, false);
@@ -4294,7 +4720,7 @@ void applyPresets(uint8_t result)
         } else if (uopt->presetPreference == 3) {
             writeProgramArrayNew(pal_1280x720, false);
         }
-#if defined(ESP8266)
+#if defined(ESP8266) || defined(ESP32)
         else if (uopt->presetPreference == OutputCustomized) {
             const uint8_t *preset = loadPresetFromLittleFS(result);
             writeProgramArrayNew(preset, false);
@@ -5077,7 +5503,11 @@ void setOutModeHdBypass(bool regsInitialized)
     GBS::PLL_DIVBY2Z::write(0); // 0_40 1 // 1= no divider (full clock, ie 27Mhz) 0 = halved
     //GBS::PLL_ADS::write(0); // 0_40 3 test:  input clock is from PCLKIN (disconnected, not ADC clock)
     GBS::PAD_OSC_CNTRL::write(1); // test: noticed some wave pattern in 720p source, this fixed it
-    GBS::PLL648_CONTROL_01::write(0x35);
+    if (rto->extClockGenDetected) {
+        GBS::PLL648_CONTROL_01::write(0x75);
+    } else {
+        GBS::PLL648_CONTROL_01::write(0x35);
+    }
     GBS::PLL648_CONTROL_03::write(0x00);
     GBS::PLL_LEN::write(1); // 0_43
     GBS::DAC_RGBS_R0ENZ::write(1);
@@ -5352,7 +5782,11 @@ void bypassModeSwitch_RGBHV()
     GBS::PLL_MS::write(2);             // 0_40 4-6 select feedback clock (but need to enable tri state!)
     GBS::PAD_TRI_ENZ::write(1);        // enable some pad's tri state (they become high-z / inputs), helps noise
     GBS::MEM_PAD_CLK_INVERT::write(0); // helps also
-    GBS::PLL648_CONTROL_01::write(0x35);
+    if (rto->extClockGenDetected) {
+        GBS::PLL648_CONTROL_01::write(0x75);
+    } else {
+        GBS::PLL648_CONTROL_01::write(0x35);
+    }
     GBS::PLL648_CONTROL_03::write(0x00); // 0_43
     GBS::PLL_LEN::write(1);              // 0_43
 
@@ -5819,22 +6253,31 @@ void printInfo()
 
 void stopWire()
 {
-    pinMode(SCL, INPUT);
-    pinMode(SDA, INPUT);
+    pinMode(SCL_PIN, INPUT);
+    pinMode(SDA_PIN, INPUT);
     delayMicroseconds(80);
 }
 
 void startWire()
 {
-    Wire.begin();
+    Wire.begin(SDA_PIN, SCL_PIN);
+    // On ESP8266 we can override pin modes to disable internal pullups.
+    // On ESP32, forcing pinMode after Wire.begin() can interfere with the HW I2C peripheral
+    // and lead to flaky transactions / partially-written Si5351 registers.
+#ifndef ESP32
     // The i2c wire library sets pullup resistors on by default.
     // Disable these to detect/work with GBS onboard pullups
-    pinMode(SCL, OUTPUT_OPEN_DRAIN);
-    pinMode(SDA, OUTPUT_OPEN_DRAIN);
+    pinMode(SCL_PIN, OUTPUT_OPEN_DRAIN);
+    pinMode(SDA_PIN, OUTPUT_OPEN_DRAIN);
+#endif
     // no issues even at 700k, requires ESP8266 160Mhz CPU clock, else (80Mhz) uses 400k in library
     // no problem with Si5351 at 700k either
+#ifdef ESP8266
     Wire.setClock(400000);
-    //Wire.setClock(700000);
+#else
+    // ESP32: 700kHz for faster I2C communication with Si5351
+    Wire.setClock(700000);
+#endif
 }
 
 void fastSogAdjust()
@@ -6474,7 +6917,7 @@ void runSyncWatcher()
             boolean needPostAdjust = 0;
             static uint16_t activePresetLineCount = 0;
             // is the source in range for scaling RGBHV and is it currently in mode 15?
-            uint16 sourceLines = GBS::STATUS_SYNC_PROC_VTOTAL::read(); // if sourceLines = 0, might be in some reset state
+            uint16_t sourceLines = GBS::STATUS_SYNC_PROC_VTOTAL::read(); // if sourceLines = 0, might be in some reset state
             if ((sourceLines <= 535 && sourceLines != 0) && rto->videoStandardInput == 15) {
                 uint16_t firstDetectedSourceLines = sourceLines;
                 boolean moveOn = 1;
@@ -6569,21 +7012,25 @@ void runSyncWatcher()
                     }
                     delay(300);
 
-                    if (rto->extClockGenDetected) {
-                        // switch to ext clock
-                        if (!rto->outModeHdBypass) {
-                            if (GBS::PLL648_CONTROL_01::read() != 0x35 && GBS::PLL648_CONTROL_01::read() != 0x75) {
-                                // first store original in an option byte in 1_2D
-                                GBS::GBS_PRESET_DISPLAY_CLOCK::write(GBS::PLL648_CONTROL_01::read());
-                                // enable and switch input
-                                Si.enable(0);
-                                delayMicroseconds(800);
-                                GBS::PLL648_CONTROL_01::write(0x75);
+                        if (rto->extClockGenDetected && !uopt->disableExternalClockGenerator) {
+                            // switch to ext clock
+                            if (!rto->outModeHdBypass) {
+                                if (GBS::PLL648_CONTROL_01::read() != 0x75) {
+                                    // Store current clock if it's not our target or internal default
+                                    if (GBS::PLL648_CONTROL_01::read() != 0x35) {
+                                        GBS::GBS_PRESET_DISPLAY_CLOCK::write(GBS::PLL648_CONTROL_01::read());
+                                    }
+                                    
+                                    // Switch to external clock (0x75)
+                                    Si.enable(0);
+                                    delayMicroseconds(800);
+                                    GBS::PLL648_CONTROL_01::write(0x75);
+                                    GBS::PAD_CKIN_ENZ::write(0); // Ensure CKIN is enabled
+                                }
                             }
+                            // sync clocks now
+                            externalClockGenSyncInOutRate();
                         }
-                        // sync clocks now
-                        externalClockGenSyncInOutRate();
-                    }
 
                     // note: this is all duplicated below. unify!
                     if (needPostAdjust) {
@@ -6682,16 +7129,20 @@ void runSyncWatcher()
                         }
                         delay(300);
 
-                        if (rto->extClockGenDetected) {
+                        if (rto->extClockGenDetected && !uopt->disableExternalClockGenerator && rto->videoStandardInput != 14) {
                             // switch to ext clock
                             if (!rto->outModeHdBypass) {
-                                if (GBS::PLL648_CONTROL_01::read() != 0x35 && GBS::PLL648_CONTROL_01::read() != 0x75) {
-                                    // first store original in an option byte in 1_2D
-                                    GBS::GBS_PRESET_DISPLAY_CLOCK::write(GBS::PLL648_CONTROL_01::read());
-                                    // enable and switch input
+                                if (GBS::PLL648_CONTROL_01::read() != 0x75) {
+                                    // Store current clock if it's not our target or internal default
+                                    if (GBS::PLL648_CONTROL_01::read() != 0x35) {
+                                        GBS::GBS_PRESET_DISPLAY_CLOCK::write(GBS::PLL648_CONTROL_01::read());
+                                    }
+                                    
+                                    // Switch to external clock (0x75)
                                     Si.enable(0);
                                     delayMicroseconds(800);
                                     GBS::PLL648_CONTROL_01::write(0x75);
+                                    GBS::PAD_CKIN_ENZ::write(0); // Ensure CKIN is enabled
                                 }
                             }
                             // sync clocks now
@@ -6964,6 +7415,37 @@ void runSyncWatcher()
         SerialM.println();
         goLowPowerWithInputDetection(); // does not further nest, so it can be called here // sets reset parameters
     }
+
+    // Monitor Si5351 lock status if generator is detected and enabled
+    if (rto->extClockGenDetected && !uopt->disableExternalClockGenerator && !rto->sourceDisconnected) {
+        static uint32_t lastSiLockCheck = 0;
+        if (millis() - lastSiLockCheck > 2000) {
+            lastSiLockCheck = millis();
+            
+            int st = -999;
+            Wire.beginTransmission(SIADDR);
+            Wire.write(0x00);
+            if (Wire.endTransmission() == 0) {
+                size_t n = Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+                if (n == 1) st = Wire.read();
+            }
+            
+            // Treat LOLA as lock indicator; ignore LOLB (PLLB). bit5=LOLA, bit6=LOLB, bit4=LOS, bit7=SYS_INIT
+            // Relaxed check: ignore SYS_INIT (bit7) for monitoring as it can be transient/sticky while PLLA is locked.
+            bool siLocked = (st >= 0) && ((st & 0x20) == 0);
+            if (!siLocked) {
+                static uint32_t lastSiLockFailLog = 0;
+                if (millis() - lastSiLockFailLog > 1000) {
+                    SerialM.printf("Si5351 lock lost (st:0x%02X). Re-syncing...\n", st);
+                    lastSiLockFailLog = millis();
+                }
+                // Try to restore sync if we have a stable source
+                if (rto->continousStableCounter > 20 && rto->noSyncCounter == 0) {
+                    externalClockGenSyncInOutRate();
+                }
+            }
+        }
+    }
 }
 
 boolean checkBoardPower()
@@ -7206,6 +7688,12 @@ void IRAM_ATTR isrRotaryEncoderPushForNewMenu()
 }
 #endif
 
+uint8_t inputAndSyncDetect();
+void handleType2Command(char argument);
+void initUpdateOTA();
+void saveUserPrefs();
+void startWebserver();
+
 void setup()
 {
     display.init();                 //inits OLED on I2C bus
@@ -7245,27 +7733,42 @@ void setup()
     if (rto->webServerEnabled) {
         // Initialize WiFi settings before starting
         // Force WiFi to sleep first to ensure clean state
+#ifdef ESP8266
         WiFi.forceSleepBegin();
+#endif
         delay(100);
+#ifdef ESP8266
         WiFi.forceSleepWake();
+#endif
         delay(100);
         
-        WiFi.persistent(false);      // Avoid ESP8266 Core 3.1.x bug and flash wear
+        // Avoid ESP8266 Core 3.1.x bug and flash wear (ESP8266 only).
+        // On ESP32, WiFi.persistent(false) changes config storage to RAM and can break loading saved creds.
+#ifdef ESP8266
+        WiFi.persistent(false);
+#endif
         WiFi.setAutoConnect(false);  // Let PersWiFiManager handle connections
         WiFi.setAutoReconnect(true); // Enable auto-reconnect on disconnect
         WiFi.mode(WIFI_OFF);         // Start with WiFi off
         delay(100);
         
         rto->allowUpdatesOTA = false;       // need to initialize for handleWiFi()
+#ifdef ESP8266
         WiFi.setSleepMode(WIFI_NONE_SLEEP); // low latency responses, less chance for missing packets
         WiFi.setPhyMode(WIFI_PHY_MODE_11G); // Force 11g mode for better stability
         WiFi.setOutputPower(18.0f);         // float: min 0.0f, max 20.5f
+#else
+        // ESP32
+        // WiFi.setSleep(false);
+#endif
         startWebserver();
         rto->webServerStarted = true;
     } else {
         //WiFi.disconnect(); // deletes credentials
         WiFi.mode(WIFI_OFF);
+#ifdef ESP8266
         WiFi.forceSleepBegin();
+#endif
     }
 #ifdef HAVE_PINGER_LIBRARY
     pingLastTime = millis();
@@ -7329,8 +7832,10 @@ void setup()
     userCommand = '@';
 
     pinMode(DEBUG_IN_PIN, INPUT);
+#ifdef LED_BUILTIN
     pinMode(LED_BUILTIN, OUTPUT);
     LEDON; // enable the LED, lets users know the board is starting up
+#endif
 
     //Serial.setDebugOutput(true); // if you want simple wifi debug info
 
@@ -7351,7 +7856,11 @@ void setup()
     GBS::PLLAD_PDZ::write(0); // AD PLL off
 
     // file system (web page, custom presets, ect)
+#ifdef ESP32
+    if (!LittleFS.begin(true)) {
+#else
     if (!LittleFS.begin()) {
+#endif
         SerialM.println(F("LittleFS mount failed! ((1M LittleFS) selected?)"));
     } else {
         // load user preferences file
@@ -7442,6 +7951,8 @@ void setup()
 
 
     GBS::PAD_CKIN_ENZ::write(1); // disable to prevent startup spike damage
+    // Ensure I2C is configured before touching Si5351 (ESP32 Wire.begin() defaults can differ).
+    startWire();
     externalClockGenDetectAndInitialize();
     // library may change i2c clock or pins, so restart
     startWire();
@@ -7462,9 +7973,13 @@ void setup()
     } else if (WiFi.SSID().length() == 0) {
         SerialM.println(FPSTR(ap_info_string));
     } else {
+#ifdef ESP8266
         SerialM.print(F("(WiFi): Connecting to "));
         SerialM.print(WiFi.SSID());
         SerialM.println(F("..."));
+#else
+        SerialM.println(F("(WiFi): Connecting..."));
+#endif
         // Don't call reconnect here, let PersWiFiManager handle it
     }
 
@@ -7756,9 +8271,20 @@ void handleWiFi(boolean instant)
 {
     static unsigned long lastTimePing = millis();
     if (rto->webServerEnabled && rto->webServerStarted) {
+#ifdef ESP8266
         MDNS.update();
+#endif
+
+#ifdef ESP32
+        webSocket.loop();
+#endif
         persWM.handleWiFi(); // if connected, returns instantly. otherwise it reconnects or opens AP
-        dnsServer.processNextRequest();
+
+        // Only process DNS requests if we are in AP mode (Captive Portal)
+        // Attempting to process requests in STA mode (where DNSServer is stopped) causes UDP errors on ESP32
+        if (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA) {
+            dnsServer.processNextRequest();
+        }
 
         if ((millis() - lastTimePing) > 953) { // slightly odd value so not everything happens at once
             // Note: ping/pong now handled by webSocket.enableHeartbeat() in setup()
@@ -8676,8 +9202,8 @@ void loop()
                 }
                 //{
                 //  float bla = 0;
-                //  double esp8266_clock_freq = ESP.getCpuFreqMHz() * 1000000;
-                //  bla = esp8266_clock_freq / (double)FrameSync::getPulseTicks();
+                //  double tickRateHz = ESP.getCpuFreqMHz() * 1000000;
+                //  bla = tickRateHz / (double)FrameSync::getPulseTicks();
                 //  Serial.println(bla, 5);
                 //}
                 break;
@@ -8852,20 +9378,45 @@ void loop()
                 GBS::SP_NO_CLAMP_REG::write(0); // 5_57 0
             }
 
-            if (rto->extClockGenDetected && rto->videoStandardInput != 14) {
-                // switch to ext clock
+            if (rto->extClockGenDetected && !uopt->disableExternalClockGenerator && rto->videoStandardInput != 14) {
+                // Use external clock if detected and enabled in options
                 if (!rto->outModeHdBypass) {
-                    if (GBS::PLL648_CONTROL_01::read() != 0x35 && GBS::PLL648_CONTROL_01::read() != 0x75) {
-                        // first store original in an option byte in 1_2D
-                        GBS::GBS_PRESET_DISPLAY_CLOCK::write(GBS::PLL648_CONTROL_01::read());
-                        // enable and switch input
+                    if (GBS::PLL648_CONTROL_01::read() != 0x75) {
+                        // Store current clock if it's not our target or internal default
+                        if (GBS::PLL648_CONTROL_01::read() != 0x35) {
+                            GBS::GBS_PRESET_DISPLAY_CLOCK::write(GBS::PLL648_CONTROL_01::read());
+                        }
+                        
+                        // Check lock for logging purposes only
+                        int st = -999;
+                        Wire.beginTransmission(SIADDR);
+                        Wire.write(0x00);
+                        if (Wire.endTransmission() == 0) {
+                            int n = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
+                            if (n == 1) st = Wire.read();
+                        }
+                        // Relaxed check: ignore SYS_INIT (bit7) for monitoring.
+                        bool siLocked = (st >= 0) && ((st & 0x20) == 0);
+                        
+                        static uint32_t lastSyncLog = 0;
+                        if (!siLocked && (millis() - lastSyncLog > 1000)) {
+                            SerialM.printf("Si5351 not locked (st:0x%02X), continuing with external clock.\n", st);
+                            lastSyncLog = millis();
+                        }
+
+                        // Switch to external clock (0x75)
                         Si.enable(0);
                         delayMicroseconds(800);
                         GBS::PLL648_CONTROL_01::write(0x75);
+                        GBS::PAD_CKIN_ENZ::write(0); // Ensure CKIN is enabled
                     }
                 }
                 // sync clocks now
                 externalClockGenSyncInOutRate();
+            } else if (rto->extClockGenDetected && uopt->disableExternalClockGenerator && GBS::PLL648_CONTROL_01::read() == 0x75) {
+                // User changed option to disabled: revert to internal clock
+                GBS::PLL648_CONTROL_01::write(0x35);
+                SerialM.println(F("External clock disabled by user, switching to internal."));
             }
             rto->applyPresetDoneStage = 0;
         }
@@ -8962,7 +9513,7 @@ void loop()
 #endif
 }
 
-#if defined(ESP8266)
+#if defined(ESP8266) || defined(ESP32)
 #include "webui_html.h"
 // gzip -c9 webui.html > webui_html && xxd -i webui_html > webui_html.h && rm webui_html && sed -i -e 's/unsigned char webui_html\[]/const uint8_t webui_html[] PROGMEM/' webui_html.h && sed -i -e 's/unsigned int webui_html_len/const unsigned int webui_html_len/' webui_html.h
 
@@ -8988,7 +9539,11 @@ void handleType2Command(char argument)
             saveUserPrefs();
             Serial.println(F("options set to defaults, restarting"));
             delay(60);
+#ifdef ESP8266
             ESP.reset(); // don't use restart(), messes up websocket reconnects
+#else
+            ESP.restart();
+#endif
             //
             break;
         case '2':
@@ -9048,10 +9603,15 @@ void handleType2Command(char argument)
             webSocket.disconnect();
             Serial.println(F("restart"));
             delay(60);
+#ifdef ESP8266
             ESP.reset(); // don't use restart(), messes up websocket reconnects
+#else
+            ESP.restart();
+#endif
             break;
         case 'e': // print files on LittleFS
         {
+#ifdef ESP8266
             Dir dir = LittleFS.openDir("/");
             while (dir.next()) {
                 SerialM.print(dir.fileName());
@@ -9059,6 +9619,17 @@ void handleType2Command(char argument)
                 SerialM.println(dir.fileSize());
                 delay(1); // wifi stack
             }
+#else
+            File root = LittleFS.open("/");
+            File file = root.openNextFile();
+            while(file){
+                SerialM.print(file.name());
+                SerialM.print(" ");
+                SerialM.println(file.size());
+                file = root.openNextFile();
+                delay(1);
+            }
+#endif
             ////
             File f = LittleFS.open("/preferencesv2.txt", "r");
             if (!f) {
@@ -9317,9 +9888,17 @@ void handleType2Command(char argument)
             // restart to attempt wifi station mode connect
             delay(30);
             WiFi.mode(WIFI_STA);
+#ifdef ESP8266
             WiFi.hostname(device_hostname_partial); // _full
+#else
+            WiFi.setHostname(device_hostname_partial);
+#endif
             delay(30);
+#ifdef ESP8266
             ESP.reset();
+#else
+            ESP.restart();
+#endif
             break;
         case 'v': {
             uopt->wantFullHeight = !uopt->wantFullHeight;
@@ -9542,7 +10121,9 @@ void handleType2Command(char argument)
 //  }
 //}
 
+#ifdef ESP8266
 WiFiEventHandler disconnectedEventHandler;
+#endif
 
 void startWebserver()
 {
@@ -9550,11 +10131,19 @@ void startWebserver()
     persWM.onConnect([]() {
         SerialM.print(F("(WiFi): STA mode connected; IP: "));
         SerialM.println(WiFi.localIP().toString());
+#ifdef ESP8266
         if (MDNS.begin(device_hostname_partial, WiFi.localIP())) { // MDNS request for gbscontrol.local
             //Serial.println("MDNS started");
             MDNS.addService("http", "tcp", 80); // Add service to MDNS-SD
             MDNS.announce();
         }
+#else
+        if (MDNS.begin(device_hostname_partial)) { // MDNS request for gbscontrol.local
+            //Serial.println("MDNS started");
+            MDNS.addService("http", "tcp", 80); // Add service to MDNS-SD
+            // MDNS.announce(); // Not needed on ESP32
+        }
+#endif
         SerialM.println(FPSTR(st_info_string));
     });
     persWM.onAp([]() {
@@ -9562,15 +10151,22 @@ void startWebserver()
         // add mdns announce here as well?
     });
 
+#ifdef ESP8266
     disconnectedEventHandler = WiFi.onStationModeDisconnected([](const WiFiEventStationModeDisconnected &event) {
         Serial.print("Station disconnected, reason: ");
         Serial.println(event.reason);
     });
+#else
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+        Serial.print("Station disconnected, reason: ");
+        Serial.println(info.wifi_sta_disconnected.reason);
+    }, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+#endif
 
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         //Serial.println("sending web page");
         if (ESP.getFreeHeap() > 10000) {
-            AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", webui_html, webui_html_len);
+            AsyncWebServerResponse *response = request->beginResponse(200, "text/html", webui_html, webui_html_len);
             response->addHeader("Content-Encoding", "gzip");
             request->send(response);
         }
@@ -9614,22 +10210,56 @@ void startWebserver()
             request->beginResponse(200, "application/json", "true");
         request->send(response);
 
+        // Temporarily enable persistence to save credentials (ESP8266 only)
         // Temporarily enable persistence to save credentials
+#ifdef ESP8266
         WiFi.persistent(true);
+#endif
         
         if (request->arg("n").length()) {     // n holds ssid
-            if (request->arg("p").length()) { // p holds password
-                // false = only save credentials, don't connect
-                WiFi.begin(request->arg("n").c_str(), request->arg("p").c_str(), 0, 0, false);
-            } else {
-                WiFi.begin(request->arg("n").c_str(), emptyString, 0, 0, false);
+            String ssid = request->arg("n");
+            String pass = request->arg("p");
+#ifdef ESP32
+            // On ESP32, WiFi.begin(..., false) does not reliably save to NVS.
+            // Use direct ESP-IDF calls to force saving to flash.
+            wifi_config_t conf;
+            if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK) {
+                memset(&conf, 0, sizeof(conf));
             }
+
+            memset(conf.sta.ssid, 0, sizeof(conf.sta.ssid));
+            strncpy((char*)conf.sta.ssid, ssid.c_str(), sizeof(conf.sta.ssid) - 1);
+            
+            if (pass.length()) {
+                memset(conf.sta.password, 0, sizeof(conf.sta.password));
+                strncpy((char*)conf.sta.password, pass.c_str(), sizeof(conf.sta.password) - 1);
+                conf.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+            } else {
+                 memset(conf.sta.password, 0, sizeof(conf.sta.password));
+                 conf.sta.threshold.authmode = WIFI_AUTH_OPEN;
+            }
+            
+            esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+            esp_wifi_set_config(WIFI_IF_STA, &conf);
+            
+            SerialM.println("Saved WiFi creds to NVS (ESP32) - Safe Method");
+#else
+            // ESP8266 logic
+            if (pass.length()) { // p holds password
+                // false = only save credentials, don't connect
+                WiFi.begin(ssid.c_str(), pass.c_str(), 0, 0, false);
+            } else {
+                WiFi.begin(ssid.c_str(), emptyString, 0, 0, false);
+            }
+#endif
         } else {
             WiFi.begin();
         }
         
-        // Disable persistence again to avoid Core 3.1.x bug
+        // Disable persistence again to avoid Core 3.1.x bug (ESP8266 only)
+#ifdef ESP8266
         WiFi.persistent(false);
+#endif
 
         userCommand = 'u'; // next loop, set wifi station mode and restart device
     });
@@ -9851,9 +10481,15 @@ void startWebserver()
 
     server.on("/filesystem/download", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (ESP.getFreeHeap() > 10000) {
-            int params = request->params();
-            if (params > 0) {
-                request->send(LittleFS, request->getParam(0)->value(), String(), true);
+            // On ESP32 query parameter ordering and
+            // unnamed params (e.g. cache-busters like "&176...") can make getParam(0) unreliable.
+            // Always resolve the file path by *name*.
+            if (request->hasParam("file")) {
+                String path = request->getParam("file")->value();
+                if (!path.startsWith("/")) {
+                    path = "/" + path;
+                }
+                request->send(LittleFS, path, String(), true);
             } else {
                 request->send(200, "application/json", "false");
             }
@@ -9864,15 +10500,36 @@ void startWebserver()
 
     server.on("/filesystem/dir", HTTP_GET, [](AsyncWebServerRequest *request) {
         if (ESP.getFreeHeap() > 10000) {
+#ifdef ESP8266
             Dir dir = LittleFS.openDir("/");
             String output = "[";
 
             while (dir.next()) {
+                String name = dir.fileName();
+                if (!name.startsWith("/")) {
+                    name = "/" + name;
+                }
                 output += "\"";
-                output += dir.fileName();
+                output += name;
                 output += "\",";
                 delay(1); // wifi stack
             }
+#else
+            File root = LittleFS.open("/");
+            String output = "[";
+            File file = root.openNextFile();
+            while(file){
+                String name = file.name();
+                if (!name.startsWith("/")) {
+                    name = "/" + name;
+                }
+                output += "\"";
+                output += name;
+                output += "\",";
+                file = root.openNextFile();
+                delay(1);
+            }
+#endif
 
             output += "]";
 
@@ -9932,6 +10589,30 @@ void startWebserver()
     //webSocket.onEvent(webSocketEvent);
 
     persWM.setConnectNonBlock(true);
+#ifdef ESP32
+    // ESP32: WiFi.SSID() is the *currently connected* SSID, not the saved one.
+    // Use the stored STA config to decide whether to attempt STA or go AP immediately.
+    bool hasStoredStaConfig = false;
+    {
+        wifi_config_t conf;
+        memset(&conf, 0, sizeof(conf));
+        // Ensure driver is initialized so esp_wifi_get_config works reliably
+        WiFi.mode(WIFI_STA);
+        delay(10);
+        if (esp_wifi_get_config(WIFI_IF_STA, &conf) == ESP_OK && conf.sta.ssid[0] != 0) {
+            hasStoredStaConfig = true;
+        }
+        // PersWiFiManager will reconfigure modes as needed
+        WiFi.mode(WIFI_OFF);
+        delay(10);
+    }
+    if (!hasStoredStaConfig) {
+        persWM.setupWiFiHandlers();
+        persWM.startApMode();
+    } else {
+        persWM.begin(); // first try connecting to stored network, go AP mode after timeout
+    }
+#else
     if (WiFi.SSID().length() == 0) {
         // no stored network to connect to > start AP mode right away
         persWM.setupWiFiHandlers();
@@ -9939,6 +10620,7 @@ void startWebserver()
     } else {
         persWM.begin(); // first try connecting to stored network, go AP mode after timeout
     }
+#endif
 
     server.begin();    // Webserver for the site
     webSocket.begin(); // Websocket for interaction
