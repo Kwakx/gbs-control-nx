@@ -136,11 +136,15 @@ void applyRGBPatches()
     if (GBS::GBS_PRESET_CUSTOM::read() == 0) {
         // colors
         GBS::VDS_Y_GAIN::write(0x80);    // 3_25
-        GBS::VDS_UCOS_GAIN::write(0x00); // 3_26
-        GBS::VDS_VCOS_GAIN::write(0x00); // 3_27
+        GBS::VDS_UCOS_GAIN::write(0x1c); // 3_26
+        GBS::VDS_VCOS_GAIN::write(0x29); // 3_27
         GBS::VDS_Y_OFST::write(0x00);
         GBS::VDS_U_OFST::write(0x00);
         GBS::VDS_V_OFST::write(0x00);
+    }
+
+    if (uopt->wantOutputComponent) {
+        applyComponentColorMixing();
     }
 }
 
