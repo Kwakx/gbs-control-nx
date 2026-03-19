@@ -24,6 +24,19 @@
 
 typedef TV5725<GBS_ADDR> GBS;
 
+static void setFrameTimeLockMethod(uint8_t method)
+{
+    if (uopt->frameTimeLockMethod == method) {
+        return;
+    }
+    if (!rto->extClockGenDetected) {
+        FrameSync::reset(uopt->frameTimeLockMethod);
+    }
+    uopt->frameTimeLockMethod = method;
+    saveUserPrefs();
+    activeFrameTimeLockInitialSteps();
+}
+
 void handleType2Command(char argument)
 {
     myLog("user", argument);
@@ -231,6 +244,14 @@ void handleType2Command(char argument)
             }
             saveUserPrefs();
             activeFrameTimeLockInitialSteps();
+            break;
+        case 'j':
+            // FTL method: VTotal + VSST
+            setFrameTimeLockMethod(0);
+            break;
+        case 'k':
+            // FTL method: VTotal only
+            setFrameTimeLockMethod(1);
             break;
         case 'l':
             // cycle through available SDRAM clocks

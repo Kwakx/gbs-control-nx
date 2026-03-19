@@ -1025,16 +1025,33 @@
                   toggle_off
                 </td>
               </tr>
-              <tr>
-                <td class="gbs-padding__left-16">Switch Lock Method</td>
+              <tr gbs-ftl-method-rows hidden>
+                <td colspan="2" class="gbs-preferences__child">
+                  FrameTime Lock Method
+                </td>
+              </tr>
+              <tr gbs-ftl-method-rows hidden>
+                <td class="gbs-padding__left-16">VTotal + VSST</td>
                 <td
                   class="gbs-icon"
-                  gbs-message="i"
+                  gbs-message="j"
                   gbs-message-type="user"
                   gbs-click="normal"
-                  style="cursor: pointer"
+                  gbs-toggle-switch="ftlMethodVtotalVsst"
                 >
-                  swap_horiz
+                  toggle_off
+                </td>
+              </tr>
+              <tr gbs-ftl-method-rows hidden>
+                <td class="gbs-padding__left-16">VTotal</td>
+                <td
+                  class="gbs-icon"
+                  gbs-message="k"
+                  gbs-message-type="user"
+                  gbs-click="normal"
+                  gbs-toggle-switch="ftlMethodVtotalOnly"
+                >
+                  toggle_off
                 </td>
               </tr>
               <tr>

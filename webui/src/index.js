@@ -178,6 +178,16 @@ const timeOutWs = () => {
     GBSControl.isWsActive = false;
     displayWifiWarning(true);
 };
+const updateFtlMethodRowsVisibility = (ftlOn) => {
+    document.querySelectorAll("[gbs-ftl-method-rows]").forEach((row) => {
+        if (ftlOn) {
+            row.removeAttribute("hidden");
+        }
+        else {
+            row.setAttribute("hidden", "");
+        }
+    });
+};
 const createWebSocket = () => {
     if (GBSControl.ws && checkReadyState()) {
         return;
@@ -300,8 +310,15 @@ const createWebSocket = () => {
                         case "reverseRotaryEncoderForOledMenu":
                             toggleMethod(button, (optionByte2 & 0x08) == 0x08);
                             break;
+                        case "ftlMethodVtotalVsst":
+                            toggleMethod(button, (optionByte2 & 0x10) == 0);
+                            break;
+                        case "ftlMethodVtotalOnly":
+                            toggleMethod(button, (optionByte2 & 0x10) == 0x10);
+                            break;
                     }
                 });
+                updateFtlMethodRowsVisibility((optionByte1 & 0x02) === 0x02);
             }
         }
     };
