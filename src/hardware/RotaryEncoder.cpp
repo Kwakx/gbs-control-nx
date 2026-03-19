@@ -36,9 +36,9 @@ void IRAM_ATTR isrRotaryEncoderRotateForNewMenu()
     OLEDMenuNav newNav;
     if (interruptTime - lastInterruptTime > 150) {
         if (!digitalRead(pin_data)) {
-            newNav = REVERSE_ROTARY_ENCODER_FOR_OLED_MENU ? OLEDMenuNav::DOWN : OLEDMenuNav::UP;
+            newNav = g_reverseRotaryEncoderForOledMenu ? OLEDMenuNav::DOWN : OLEDMenuNav::UP;
         } else {
-            newNav = REVERSE_ROTARY_ENCODER_FOR_OLED_MENU ? OLEDMenuNav::UP : OLEDMenuNav::DOWN;
+            newNav = g_reverseRotaryEncoderForOledMenu ? OLEDMenuNav::UP : OLEDMenuNav::DOWN;
         }
         if (newNav != lastNav && (interruptTime - lastNavUpdateTime < 120)) {
             // ignore rapid changes to filter out mis-reads. besides, you are not supposed to rotate the encoder this fast anyway

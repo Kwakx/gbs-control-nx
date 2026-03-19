@@ -101,6 +101,9 @@ void updateWebSocketData()
             if (uopt->disableExternalClockGenerator) {
                 toSend[5] |= (1 << 2);
             }
+            if (uopt->reverseRotaryEncoderForOledMenu) {
+                toSend[5] |= (1 << 3);
+            }
 
             // send ping and stats
             if (ESP.getFreeHeap() > 6000) {

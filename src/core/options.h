@@ -37,6 +37,7 @@ struct userOptions
     uint8_t wantFullHeight;
     uint8_t enableCalibrationADC;
     uint8_t scanlineStrength;
+    uint8_t reverseRotaryEncoderForOledMenu; // 0/1; default from REVERSE_ROTARY_ENCODER_FOR_OLED_MENU
 };
 
 

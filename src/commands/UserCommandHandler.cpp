@@ -116,6 +116,12 @@ void handleType2Command(char argument)
             ESP.restart();
 #endif
             break;
+        case 'R':
+            uopt->reverseRotaryEncoderForOledMenu ^= 1;
+            SerialM.print(F("reverse OLED rotary: "));
+            SerialM.println(uopt->reverseRotaryEncoderForOledMenu ? F("on") : F("off"));
+            saveUserPrefs();
+            break;
         case 'e': // print files on LittleFS
         {
 #ifdef ESP8266

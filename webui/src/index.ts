@@ -25,21 +25,21 @@ const Structs: StructDescriptors = {
 const StructParser = {
   pos: 0,
   parseStructArray(
-    buff: ArrayBuffer,
+    buff: ArrayBuffer | Uint8Array,
     structsDescriptors: StructDescriptors,
     struct: string
   ) {
     const currentStruct = structsDescriptors[struct];
 
     this.pos = 0;
-    buff = new Uint8Array(buff);
+    const u8 = buff instanceof Uint8Array ? buff : new Uint8Array(buff);
 
     if (currentStruct) {
       const structSize = StructParser.getSize(structsDescriptors, struct);
 
-      return [...Array(buff.byteLength / structSize)].map(() => {
+      return [...Array(u8.byteLength / structSize)].map(() => {
         return currentStruct.reduce((acc, structItem) => {
-          acc[structItem.name] = this.getValue(buff, structItem);
+          acc[structItem.name] = this.getValue(u8, structItem);
           return acc;
         }, {});
       });
@@ -47,7 +47,7 @@ const StructParser = {
 
     return null;
   },
-  getValue(buff: any[], structItem: { type: "byte" | "string"; size: number }) {
+  getValue(buff: Uint8Array, structItem: { type: "byte" | "string"; size: number }) {
     switch (structItem.type) {
       case "byte":
         return buff[this.pos++];
@@ -357,6 +357,9 @@ const createWebSocket = () => {
               break;
             case "disableExternalClockGenerator":
               toggleMethod(button, (optionByte2 & 0x04) == 0x04);
+              break;
+            case "reverseRotaryEncoderForOledMenu":
+              toggleMethod(button, (optionByte2 & 0x08) == 0x08);
               break;
           }
         });

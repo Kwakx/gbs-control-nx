@@ -886,6 +886,25 @@
               </tr>
               <tr>
                 <td>
+                  Reverse OLED menu rotary
+                  <!-- prettier-ignore -->
+                  <ul class="gbs-help">
+                    <li>Some devices (e.g. ODV-GBS-C) need this on so clockwise rotation moves down in the OLED menu.</li>
+                    <li>Setting is saved on the device and kept across firmware updates.</li>
+                  </ul>
+                </td>
+                <td
+                  gbs-message="R"
+                  gbs-message-type="user"
+                  gbs-click="normal"
+                  class="gbs-icon"
+                  gbs-toggle-switch="reverseRotaryEncoderForOledMenu"
+                >
+                  toggle_off
+                </td>
+              </tr>
+              <tr>
+                <td>
                   Low Res: Use Upscaling
                   <!-- prettier-ignore -->
                   <ul class="gbs-help">
