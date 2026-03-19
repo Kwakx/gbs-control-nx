@@ -55,22 +55,22 @@ namespace MeasurePeriod {
 
 void setExternalClockGenFrequencySmooth(uint32_t freq) {
     uint32_t current = rto->freqExtClockGen;
-
     rto->freqExtClockGen = freq;
 
     constexpr uint32_t STEP_SIZE_HZ = 1000;
+    constexpr uint32_t MAX_DELTA = 750000;
 
-    if (current > rto->freqExtClockGen) {
-        if ((current - rto->freqExtClockGen) < 750000) {
-            while (current > (rto->freqExtClockGen + STEP_SIZE_HZ)) {
+    if (current > freq) {
+        if ((current - freq) < MAX_DELTA) {
+            while (current > (freq + STEP_SIZE_HZ)) {
                 current -= STEP_SIZE_HZ;
                 Si.setFreq(0, current);
                 handleWiFi(0);
             }
         }
-    } else if (current < rto->freqExtClockGen) {
-        if ((rto->freqExtClockGen - current) < 750000) {
-            while ((current + STEP_SIZE_HZ) < rto->freqExtClockGen) {
+    } else if (current < freq) {
+        if ((freq - current) < MAX_DELTA) {
+            while ((current + STEP_SIZE_HZ) < freq) {
                 current += STEP_SIZE_HZ;
                 Si.setFreq(0, current);
                 handleWiFi(0);
@@ -78,6 +78,6 @@ void setExternalClockGenFrequencySmooth(uint32_t freq) {
         }
     }
 
-    Si.setFreq(0, rto->freqExtClockGen);
+    Si.setFreq(0, freq);
 }
 
