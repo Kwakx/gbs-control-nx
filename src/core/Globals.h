@@ -59,6 +59,8 @@ extern OLEDMenuManager oledMenu;
 extern OSDManager osdManager;
 extern volatile OLEDMenuNav oledNav;
 extern volatile uint8_t rotaryIsrID;
+/** Mirrors uopt->reverseRotaryEncoderForOledMenu for IRAM ISR (see syncReverseRotaryEncoderIsrMirror). */
+extern volatile uint8_t g_reverseRotaryEncoderForOledMenu;
 #else
 extern String oled_menu[4];
 extern String oled_Resolutions[7];

@@ -886,6 +886,25 @@
               </tr>
               <tr>
                 <td>
+                  Reverse OLED menu rotary
+                  <!-- prettier-ignore -->
+                  <ul class="gbs-help">
+                    <li>Some devices (e.g. ODV-GBS-C) need this on so clockwise rotation moves down in the OLED menu.</li>
+                    <li>Setting is saved on the device and kept across firmware updates.</li>
+                  </ul>
+                </td>
+                <td
+                  gbs-message="R"
+                  gbs-message-type="user"
+                  gbs-click="normal"
+                  class="gbs-icon"
+                  gbs-toggle-switch="reverseRotaryEncoderForOledMenu"
+                >
+                  toggle_off
+                </td>
+              </tr>
+              <tr>
+                <td>
                   Low Res: Use Upscaling
                   <!-- prettier-ignore -->
                   <ul class="gbs-help">
@@ -1006,16 +1025,38 @@
                   toggle_off
                 </td>
               </tr>
-              <tr>
-                <td class="gbs-padding__left-16">Switch Lock Method</td>
+              <tr gbs-ftl-method-rows hidden>
+                <td colspan="2" class="gbs-preferences__child">
+                  FrameTime Lock Method
+                  <!-- prettier-ignore -->
+                  <ul class="gbs-help">
+                    <li>VTotal + VSST: adjusts both vertical total and vertical sync start for precise locking.</li>
+                    <li>VTotal only: adjusts vertical total only, simpler approach.</li>
+                  </ul>
+                </td>
+              </tr>
+              <tr gbs-ftl-method-rows hidden>
+                <td class="gbs-padding__left-16">VTotal + VSST</td>
                 <td
                   class="gbs-icon"
-                  gbs-message="i"
+                  gbs-message="j"
                   gbs-message-type="user"
                   gbs-click="normal"
-                  style="cursor: pointer"
+                  gbs-toggle-switch="ftlMethodVtotalVsst"
                 >
-                  swap_horiz
+                  toggle_off
+                </td>
+              </tr>
+              <tr gbs-ftl-method-rows hidden>
+                <td class="gbs-padding__left-16">VTotal</td>
+                <td
+                  class="gbs-icon"
+                  gbs-message="k"
+                  gbs-message-type="user"
+                  gbs-click="normal"
+                  gbs-toggle-switch="ftlMethodVtotalOnly"
+                >
+                  toggle_off
                 </td>
               </tr>
               <tr>

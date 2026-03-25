@@ -101,6 +101,11 @@ private:
     /// Reset with syncLastCorrection.
     static float maybeFreqExt_per_videoFps;
 
+    /// EMA-smoothed input FPS for runFrequency(). Filters ISR measurement
+    /// jitter that otherwise causes the output clock to oscillate.
+    /// Initialized to 0 (meaning unset); first valid measurement seeds it.
+    static float smoothedFpsInput;
+
     // Sample vsync start and stop times from debug pin.
     static bool vsyncOutputSample(uint32_t *start, uint32_t *stop)
     {
@@ -329,6 +334,14 @@ public:
         return syncLockReady;
     }
 
+    /// True when PLL is locked AND frequency mapping is initialized.
+    /// ready() alone can be true while maybeFreqExt_per_videoFps is
+    /// still unset after a preset change.
+    static bool frequencyReady(void)
+    {
+        return syncLockReady && maybeFreqExt_per_videoFps >= 0;
+    }
+
     static int16_t getSyncLastCorrection()
     {
         return syncLastCorrection;
@@ -356,6 +369,7 @@ public:
         // Not clearing is hopefully safe. See reset() for an
         // explanation.
         maybeFreqExt_per_videoFps = -1;
+        smoothedFpsInput = 0;
     }
 
     // Sample vsync start and stop times from debug pin.
@@ -476,6 +490,7 @@ public:
 
     static void clearFrequency() {
         maybeFreqExt_per_videoFps = -1;
+        smoothedFpsInput = 0;
     }
 
     static void initFrequency(float outFramesPerS, uint32_t freqExtClockGen) {
@@ -601,6 +616,9 @@ public:
                 continue;
             }
 
+            // Average the two consistent measurements to reduce jitter.
+            fpsInput = 0.5f * (fpsInput + fpsInput2);
+
             success = true;
             break;
         }
@@ -608,6 +626,16 @@ public:
             SerialM.printf("FrameSyncManager::runFrequency() failed!\n");
             return false;
         }
+
+        // EMA smoothing on fpsInput to filter ISR measurement jitter
+        // that otherwise causes the output clock to oscillate.
+        constexpr float FPS_EMA_ALPHA = 0.15f;
+        if (smoothedFpsInput < 47.0f) smoothedFpsInput = fpsInput;
+        smoothedFpsInput = FPS_EMA_ALPHA * fpsInput + (1.0f - FPS_EMA_ALPHA) * smoothedFpsInput;
+
+        // Use smoothed FPS as the base frequency for phase correction.
+        const float rawFpsInput = fpsInput;
+        fpsInput = smoothedFpsInput;
 
         // ESP CPU cycles
         int32_t target = (syncTargetPhase * periodInput) / 360;
@@ -664,9 +692,9 @@ public:
 
         const auto freqExtClockGen = (uint32_t)(maybeFreqExt_per_videoFps * fpsOutput);
 
-        fsDebugPrintf(
-            "Setting clock frequency from %u to %u\n",
-            rto->freqExtClockGen, freqExtClockGen);
+        int32_t freqDelta = (int32_t)freqExtClockGen - (int32_t)rto->freqExtClockGen;
+        SerialM.printf("runFreq: fps=%.2f(%.2f) corr=%+.4f%% clock=%+.1fkHz\n",
+            rawFpsInput, smoothedFpsInput, correction * 100.0f, freqDelta / 1000.0f);
 
         setExternalClockGenFrequencySmooth(freqExtClockGen);
         return true;
@@ -680,6 +708,9 @@ int16_t FrameSyncManager<GBS, Attrs>::syncLastCorrection;
 
 template <class GBS, class Attrs>
 float FrameSyncManager<GBS, Attrs>::maybeFreqExt_per_videoFps;
+
+template <class GBS, class Attrs>
+float FrameSyncManager<GBS, Attrs>::smoothedFpsInput;
 
 template <class GBS, class Attrs>
 uint8_t FrameSyncManager<GBS, Attrs>::delayLock;

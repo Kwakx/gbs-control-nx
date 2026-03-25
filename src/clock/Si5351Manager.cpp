@@ -148,6 +148,15 @@ void externalClockGenSyncInOutRate()
         return;
     }
 
+    // When FTL is enabled and the PLL is fully operational,
+    // runFrequency() handles clock tracking. Skip coarse sync to avoid
+    // disrupting it. Sync still runs when: FTL off, PLL not yet locked,
+    // or frequency mapping not yet initialized (after preset change).
+    if (uopt->enableFrameTimeLock && FrameSync::frequencyReady()) {
+        fsDebugPrintf("sync skipped: FTL PLL active\n");
+        return;
+    }
+
     float sfr = getSourceFieldRate(0);
 
     if (sfr < 47.0f || sfr > 86.0f) {
@@ -164,83 +173,38 @@ void externalClockGenSyncInOutRate()
         return;
     }
 
-    // ESP32 can exhibit timing jitter in the measurement path; instead of skipping
-    // (which stalls convergence), clamp the correction per step to avoid large jumps.
-    float ratio = (ofr > 0.0f) ? (sfr / ofr) : 1.0f;
-    constexpr float MAX_RATIO_STEP = 0.0006f; // match FrameSyncManager::runFrequency clamp
-    if (ratio > 1.0f + MAX_RATIO_STEP) ratio = 1.0f + MAX_RATIO_STEP;
-    if (ratio < 1.0f - MAX_RATIO_STEP) ratio = 1.0f - MAX_RATIO_STEP;
+    // EMA smoothing on sfr to filter ISR measurement jitter.
+    // Re-seed when sfr jumps >2Hz (mode change, not jitter).
+    static float smoothedSfr = 0.0f;
+    constexpr float EMA_ALPHA = 0.3f;
+    if (smoothedSfr < 47.0f || fabsf(sfr - smoothedSfr) > 2.0f) {
+        smoothedSfr = sfr; // initialize or re-seed after mode change
+    }
+    smoothedSfr = EMA_ALPHA * sfr + (1.0f - EMA_ALPHA) * smoothedSfr;
+
+    float ratio = (ofr > 0.0f) ? (smoothedSfr / ofr) : 1.0f;
 
     uint32_t old = rto->freqExtClockGen;
-    FrameSync::initFrequency(ofr, old);
+    uint32_t newClockFreq = ratio * old;
+    int32_t delta = (int32_t)newClockFreq - (int32_t)old;
 
-    uint32_t newClockFreq = ratio * rto->freqExtClockGen;
-    // Program Si5351 safely: disconnect GBS clock input during programming/lock window.
-    // Avoid using setExternalClockGenFrequencySmooth() here because it iterates many Si.setFreq()
-    // calls without any CKIN gating, which can glitch the active video clock.
+    // Clamp delta — large changes go through externalClockGenResetClock().
+    constexpr int32_t MAX_DELTA = 25000; // 25kHz per cycle
+    if (delta > MAX_DELTA) delta = MAX_DELTA;
+    if (delta < -MAX_DELTA) delta = -MAX_DELTA;
+    newClockFreq = old + delta;
 
-    // keep CKIN disabled while reprogramming
-    GBS::PAD_CKIN_ENZ::write(1);
-    // re-apply the best XTAL_CL we discovered earlier for consistency
-    Wire.beginTransmission(SIADDR);
-    Wire.write(183);
-    Wire.write(g_si5351_best_xtal_cl);
-    Wire.endTransmission();
-    // program the new frequency in one shot (small ratio steps already clamp the delta)
+    SerialM.printf("sync: sfr=%.2fHz(%.2f) ofr=%.2fHz delta=%.1fkHz\n",
+        sfr, smoothedSfr, ofr, delta / 1000.0f);
+
     Si.setFreq(0, newClockFreq);
-    Si.enable(0);
-    Wire.beginTransmission(SIADDR);
-    Wire.write(0x01);
-    Wire.write(0xFF);
-    Wire.endTransmission();
-    // Wait until LOLA/LOLB clear (ignore LOS), then re-enable CKIN.
-    // Reuse the same lock criteria as externalClockGenResetClock.
-    uint32_t t0 = millis();
-    int st = -999;
-    while (millis() - t0 < 80) {
-        Wire.beginTransmission(SIADDR);
-        Wire.write(0x00);
-        if (Wire.endTransmission() == 0) {
-            int n = (int)Wire.requestFrom((uint8_t)SIADDR, (size_t)1, false);
-            if (n == 1) st = Wire.read();
-        }
-        if (st >= 0 && (st & 0x20) == 0 && (st & 0x80) == 0) break;
-        delay(1);
-    }
-    bool ok = (st >= 0 && (st & 0x20) == 0 && (st & 0x80) == 0);
-    if (!ok) {
-        static uint32_t lastSyncFailLog = 0;
-        if (millis() - lastSyncFailLog > 1000) {
-            SerialM.printf("Si5351 sync-tune lock failed (st:0x%02X). Rolling back to %u Hz.\n", st, old);
-            lastSyncFailLog = millis();
-        }
-        Si.setFreq(0, old);
-        Si.enable(0);
-        Wire.beginTransmission(SIADDR);
-        Wire.write(0x01);
-        Wire.write(0xFF);
-        Wire.endTransmission();
-        rto->freqExtClockGen = old;
-    } else {
-        rto->freqExtClockGen = newClockFreq;
-    }
-    // Reconnect GBS to the (restored/new) external clock.
-    GBS::PAD_CKIN_ENZ::write(0);
+    rto->freqExtClockGen = newClockFreq;
+    FrameSync::initFrequency(ofr, newClockFreq);
 
-
-    int32_t diff = rto->freqExtClockGen - old;
-
-    SerialM.print(F("source Hz: "));
-    SerialM.print(sfr, 5);
-    SerialM.print(F(" new out: "));
-    SerialM.print(getOutputFrameRate(), 5);
-    SerialM.print(F(" clock: "));
-    SerialM.print(rto->freqExtClockGen);
-    SerialM.print(F(" ("));
-    SerialM.print(diff >= 0 ? "+" : "");
-    SerialM.print(diff);
-    SerialM.println(F(")"));
-    // (no extra delay here; video clock is already back on after CKIN enable)
+    SerialM.printf("sync done: clock=%.2fMHz (%+.1fkHz)\n",
+        rto->freqExtClockGen / 1000000.0f, delta / 1000.0f);
+    // Allow Si5351 output to settle before next sync cycle.
+    delay(1);
 }
 
 void externalClockGenDetectAndInitialize()

@@ -3,6 +3,15 @@
 #include "../web/SerialMirror.h"
 #include <LittleFS.h>
 #include "../core/options.h"
+#include "../menu/OLEDMenuConfig.h"
+#include "../config/Config.h"
+
+void syncReverseRotaryEncoderIsrMirror()
+{
+#if USE_NEW_OLED_MENU
+    g_reverseRotaryEncoderForOledMenu = uopt->reverseRotaryEncoderForOledMenu ? 1 : 0;
+#endif
+}
 
 void loadDefaultUserOptions()
 {
@@ -25,6 +34,9 @@ void loadDefaultUserOptions()
     uopt->enableCalibrationADC = 1;          // #17
     uopt->scanlineStrength = 0x30;           // #18
     uopt->disableExternalClockGenerator = 0; // #19
+    uopt->reverseRotaryEncoderForOledMenu =
+        REVERSE_ROTARY_ENCODER_FOR_OLED_MENU > 0 ? 1 : 0; // #20 default from build-time macro
+    syncReverseRotaryEncoderIsrMirror();
 }
 
 void saveUserPrefs()
@@ -53,7 +65,9 @@ void saveUserPrefs()
     f.write(uopt->enableCalibrationADC + '0');          // #17
     f.write(uopt->scanlineStrength + '0');              // #18
     f.write(uopt->disableExternalClockGenerator + '0'); // #19
+    f.write(uopt->reverseRotaryEncoderForOledMenu + '0'); // #20
 
     f.close();
+    syncReverseRotaryEncoderIsrMirror();
 }
 

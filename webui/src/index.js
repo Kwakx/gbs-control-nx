@@ -15,12 +15,12 @@ const StructParser = {
     parseStructArray(buff, structsDescriptors, struct) {
         const currentStruct = structsDescriptors[struct];
         this.pos = 0;
-        buff = new Uint8Array(buff);
+        const u8 = buff instanceof Uint8Array ? buff : new Uint8Array(buff);
         if (currentStruct) {
             const structSize = StructParser.getSize(structsDescriptors, struct);
-            return [...Array(buff.byteLength / structSize)].map(() => {
+            return [...Array(u8.byteLength / structSize)].map(() => {
                 return currentStruct.reduce((acc, structItem) => {
-                    acc[structItem.name] = this.getValue(buff, structItem);
+                    acc[structItem.name] = this.getValue(u8, structItem);
                     return acc;
                 }, {});
             });
@@ -178,6 +178,16 @@ const timeOutWs = () => {
     GBSControl.isWsActive = false;
     displayWifiWarning(true);
 };
+const updateFtlMethodRowsVisibility = (ftlOn) => {
+    document.querySelectorAll("[gbs-ftl-method-rows]").forEach((row) => {
+        if (ftlOn) {
+            row.removeAttribute("hidden");
+        }
+        else {
+            row.setAttribute("hidden", "");
+        }
+    });
+};
 const createWebSocket = () => {
     if (GBSControl.ws && checkReadyState()) {
         return;
@@ -297,8 +307,18 @@ const createWebSocket = () => {
                         case "disableExternalClockGenerator":
                             toggleMethod(button, (optionByte2 & 0x04) == 0x04);
                             break;
+                        case "reverseRotaryEncoderForOledMenu":
+                            toggleMethod(button, (optionByte2 & 0x08) == 0x08);
+                            break;
+                        case "ftlMethodVtotalVsst":
+                            toggleMethod(button, (optionByte2 & 0x10) == 0);
+                            break;
+                        case "ftlMethodVtotalOnly":
+                            toggleMethod(button, (optionByte2 & 0x10) == 0x10);
+                            break;
                     }
                 });
+                updateFtlMethodRowsVisibility((optionByte1 & 0x02) === 0x02);
             }
         }
     };
@@ -623,9 +643,9 @@ const doBackup = () => {
         const backupFilesJSON = JSON.stringify(headerDescriptor);
         const backupFilesJSONSize = backupFilesJSON.length;
         const mainHeader = [
-            (backupFilesJSONSize >> 24) & 255,
-            (backupFilesJSONSize >> 16) & 255,
-            (backupFilesJSONSize >> 8) & 255,
+            (backupFilesJSONSize >> 24) & 255, // size
+            (backupFilesJSONSize >> 16) & 255, // size
+            (backupFilesJSONSize >> 8) & 255, // size
             (backupFilesJSONSize >> 0) & 255,
         ];
         const outputArray = [

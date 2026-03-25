@@ -10,6 +10,7 @@ OLEDMenuManager oledMenu(&display);
 OSDManager osdManager;
 volatile OLEDMenuNav oledNav = OLEDMenuNav::IDLE;
 volatile uint8_t rotaryIsrID = 0;
+volatile uint8_t g_reverseRotaryEncoderForOledMenu = 0;
 #else
 String oled_menu[4] = {"Resolutions", "Presets", "Misc.", "Current Settings"};
 String oled_Resolutions[7] = {"1280x960", "1280x1024", "1280x720", "1920x1080", "480/576", "Downscale", "Pass-Through"};

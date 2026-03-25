@@ -395,7 +395,17 @@ void setup()
             if (uopt->disableExternalClockGenerator > 1)
                 uopt->disableExternalClockGenerator = 0;
 
+            if (f.available()) {
+                uopt->reverseRotaryEncoderForOledMenu = (uint8_t)(f.read() - '0'); // #20
+                if (uopt->reverseRotaryEncoderForOledMenu > 1)
+                    uopt->reverseRotaryEncoderForOledMenu = 0;
+            } else {
+                uopt->reverseRotaryEncoderForOledMenu =
+                    REVERSE_ROTARY_ENCODER_FOR_OLED_MENU > 0 ? 1 : 0;
+            }
+
             f.close();
+            syncReverseRotaryEncoderIsrMirror();
         }
     }
 
