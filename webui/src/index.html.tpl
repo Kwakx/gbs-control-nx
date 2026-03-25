@@ -1028,6 +1028,11 @@
               <tr gbs-ftl-method-rows hidden>
                 <td colspan="2" class="gbs-preferences__child">
                   FrameTime Lock Method
+                  <!-- prettier-ignore -->
+                  <ul class="gbs-help">
+                    <li>VTotal + VSST: adjusts both vertical total and vertical sync start for precise locking.</li>
+                    <li>VTotal only: adjusts vertical total only, simpler approach.</li>
+                  </ul>
                 </td>
               </tr>
               <tr gbs-ftl-method-rows hidden>
