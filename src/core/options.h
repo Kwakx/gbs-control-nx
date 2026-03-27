@@ -38,6 +38,7 @@ struct userOptions
     uint8_t enableCalibrationADC;
     uint8_t scanlineStrength;
     uint8_t reverseRotaryEncoderForOledMenu; // 0/1; default from REVERSE_ROTARY_ENCODER_FOR_OLED_MENU
+    uint8_t PalForceNoBestHTotal; // 0/1; debug: skip auto-best-htotal for PAL 50Hz sources
 };
 
 

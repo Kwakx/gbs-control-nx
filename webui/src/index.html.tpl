@@ -966,6 +966,26 @@
               </tr>
               <tr>
                 <td>
+                  PAL: Skip Frame Sync Adjustment
+                  <!-- prettier-ignore -->
+                  <ul class="gbs-help">
+                    <li>Debug option for PAL black screen issues (issue #10).</li>
+                    <li>Disables automatic horizontal timing adjustment for PAL 50Hz sources.</li>
+                    <li>Enable this and reboot to test if frame sync causes the black screen.</li>
+                  </ul>
+                </td>
+                <td
+                  gbs-message="V"
+                  gbs-message-type="user"
+                  gbs-click="normal"
+                  class="gbs-icon"
+                  gbs-toggle-switch="palForceNoBestHTotal"
+                >
+                  toggle_off
+                </td>
+              </tr>
+              <tr>
+                <td>
                   Disable External Clock Generator
                   <!-- prettier-ignore -->
                   <ul class="gbs-help">

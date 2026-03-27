@@ -36,6 +36,7 @@ void loadDefaultUserOptions()
     uopt->disableExternalClockGenerator = 0; // #19
     uopt->reverseRotaryEncoderForOledMenu =
         REVERSE_ROTARY_ENCODER_FOR_OLED_MENU > 0 ? 1 : 0; // #20 default from build-time macro
+    uopt->PalForceNoBestHTotal = 0;                        // #21
     syncReverseRotaryEncoderIsrMirror();
 }
 
@@ -66,6 +67,7 @@ void saveUserPrefs()
     f.write(uopt->scanlineStrength + '0');              // #18
     f.write(uopt->disableExternalClockGenerator + '0'); // #19
     f.write(uopt->reverseRotaryEncoderForOledMenu + '0'); // #20
+    f.write(uopt->PalForceNoBestHTotal + '0');              // #21
 
     f.close();
     syncReverseRotaryEncoderIsrMirror();

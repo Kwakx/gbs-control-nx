@@ -404,6 +404,14 @@ void setup()
                     REVERSE_ROTARY_ENCODER_FOR_OLED_MENU > 0 ? 1 : 0;
             }
 
+            if (f.available()) {
+                uopt->PalForceNoBestHTotal = (uint8_t)(f.read() - '0'); // #21
+                if (uopt->PalForceNoBestHTotal > 1)
+                    uopt->PalForceNoBestHTotal = 0;
+            } else {
+                uopt->PalForceNoBestHTotal = 0;
+            }
+
             f.close();
             syncReverseRotaryEncoderIsrMirror();
         }
@@ -1568,7 +1576,12 @@ void loop()
                 uint16_t htotal = GBS::STATUS_SYNC_PROC_HTOTAL::read();
                 uint16_t pllad = GBS::PLLAD_MD::read();
                 if (((htotal > (pllad - 3)) && (htotal < (pllad + 3)))) {
-                    runAutoBestHTotal();
+                    if (uopt->PalForceNoBestHTotal &&
+                        (rto->videoStandardInput == 2 || rto->videoStandardInput == 4)) {
+                        // skip for PAL debug
+                    } else {
+                        runAutoBestHTotal();
+                    }
                 }
             }
         }

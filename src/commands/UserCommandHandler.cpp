@@ -135,6 +135,12 @@ void handleType2Command(char argument)
             SerialM.println(uopt->reverseRotaryEncoderForOledMenu ? F("on") : F("off"));
             saveUserPrefs();
             break;
+        case 'V':
+            uopt->PalForceNoBestHTotal ^= 1;
+            SerialM.print(F("PAL skip frame sync: "));
+            SerialM.println(uopt->PalForceNoBestHTotal ? F("on") : F("off"));
+            saveUserPrefs();
+            break;
         case 'e': // print files on LittleFS
         {
 #ifdef ESP8266

@@ -310,6 +310,9 @@ const createWebSocket = () => {
                         case "reverseRotaryEncoderForOledMenu":
                             toggleMethod(button, (optionByte2 & 0x08) == 0x08);
                             break;
+                        case "palForceNoBestHTotal":
+                            toggleMethod(button, (optionByte2 & 0x20) == 0x20);
+                            break;
                         case "ftlMethodVtotalVsst":
                             toggleMethod(button, (optionByte2 & 0x10) == 0);
                             break;

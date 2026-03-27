@@ -1261,7 +1261,12 @@ void doPostPresetLoadSteps()
                             ok = 1;
                     }
                     if (ok) { // else leave it for later
-                        runAutoBestHTotal();
+                        if (uopt->PalForceNoBestHTotal &&
+                            (rto->videoStandardInput == 2 || rto->videoStandardInput == 4)) {
+                            SerialM.println(F("[PAL diag] skipping initial runAutoBestHTotal (PalForceNoBestHTotal)"));
+                        } else {
+                            runAutoBestHTotal();
+                        }
                         delay(1); // wifi
                         break;
                     }
@@ -1539,7 +1544,41 @@ void doPostPresetLoadSteps()
         SerialM.print(F("\nNote: scaling RGB is still in development"));
     }
     // presetPreference = OutputCustomized may fail to load (missing) preset file and arrive here with defaults
-    SerialM.println("\n");
+    SerialM.println();
+
+    // diagnostic logging for PAL input modes (issue #10)
+    if (rto->videoStandardInput == 2 || rto->videoStandardInput == 4) {
+        SerialM.print(F("[PAL diag] VDS: HT="));
+        SerialM.print(GBS::VDS_HSYNC_RST::read());
+        SerialM.print(F(" VT="));
+        SerialM.print(GBS::VDS_VSYNC_RST::read());
+        SerialM.print(F(" HA="));
+        SerialM.print(GBS::VDS_DIS_HB_ST::read() - GBS::VDS_DIS_HB_SP::read());
+        SerialM.print(F(" VA="));
+        SerialM.println(GBS::VDS_DIS_VB_ST::read() - GBS::VDS_DIS_VB_SP::read());
+        SerialM.print(F("[PAL diag] IF: HB_ST2=0x"));
+        SerialM.print(GBS::IF_HB_ST2::read(), HEX);
+        SerialM.print(F(" HB_SP2=0x"));
+        SerialM.print(GBS::IF_HB_SP2::read(), HEX);
+        SerialM.print(F(" HB_SP=0x"));
+        SerialM.print(GBS::IF_HB_SP::read(), HEX);
+        SerialM.print(F(" HBIN_SP=0x"));
+        SerialM.println(GBS::IF_HBIN_SP::read(), HEX);
+        SerialM.print(F("[PAL diag] HS="));
+        SerialM.print(GBS::VDS_HS_ST::read());
+        SerialM.print(F("/"));
+        SerialM.print(GBS::VDS_HS_SP::read());
+        SerialM.print(F(" VS="));
+        SerialM.print(GBS::VDS_VS_ST::read());
+        SerialM.print(F("/"));
+        SerialM.print(GBS::VDS_VS_SP::read());
+        SerialM.print(F(" clock=0x"));
+        SerialM.println(GBS::PLL648_CONTROL_01::read(), HEX);
+        if (uopt->PalForceNoBestHTotal) {
+            SerialM.println(F("[PAL diag] PalForceNoBestHTotal ACTIVE - frame sync skipped"));
+        }
+    }
+    SerialM.println();
 }
 
 void setOutModeHdBypass(bool regsInitialized)

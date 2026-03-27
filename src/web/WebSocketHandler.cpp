@@ -107,6 +107,9 @@ void updateWebSocketData()
             if (uopt->frameTimeLockMethod == 1) {
                 toSend[5] |= (1 << 4);
             }
+            if (uopt->PalForceNoBestHTotal) {
+                toSend[5] |= (1 << 5);
+            }
 
             // send ping and stats
             if (ESP.getFreeHeap() > 6000) {
